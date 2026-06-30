@@ -1,0 +1,32 @@
+# ============================================================
+# Core 模块配置文件模板
+# 使用方法:
+#   1. 复制为 application.properties
+#   2. 填入真实值
+#   3. application.properties 不会被提交到 Git
+# ============================================================
+
+# ------- Kafka -------
+kafka.bootstrap.servers=192.168.137.210:9092
+kafka.topic=stock_quote_raw
+kafka.group.id=stock_streaming_consumer
+
+# ------- HDFS -------
+hdfs.uri=hdfs://192.168.137.201:9000
+hdfs.ods.path=/stock/ods/quote_raw
+hdfs.dwd.path=/stock/dwd/quote_clean
+hdfs.checkpoint.path=/stock/checkpoint/streaming
+
+# ------- MySQL -------
+mysql.url=jdbc:mysql://192.168.137.210:3306/stock_ads?useUnicode=true&characterEncoding=utf8
+mysql.user=请填写用户名
+mysql.password=请填写密码
+
+# ------- Redis -------
+redis.host=192.168.137.210
+redis.port=6379
+redis.password=请填写密码
+
+# ------- Streaming -------
+streaming.batch.duration.seconds=10
+streaming.minute.window.seconds=300
