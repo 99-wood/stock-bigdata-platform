@@ -369,6 +369,7 @@ def start():
         "INTERVAL": interval,
         "STOCK_LIMIT": stock_limit,
         "ROLLING_SIZE": rolling_size,
+        "REDIS_PASSWORD": os.environ.get("REDIS_PASSWORD", ""),
     }
 
     volumes = {}

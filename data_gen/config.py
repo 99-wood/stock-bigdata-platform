@@ -17,7 +17,7 @@ TOPIC = os.environ.get("KAFKA_TOPIC", "stock_quote_raw")
 # Redis (bid/ask 直写，绕过 Kafka)
 REDIS_HOST = os.environ.get("REDIS_HOST", "192.168.137.210")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
-REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "1")
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")  # 必须通过环境变量注入
 REDIS_BIDASK_TTL = int(os.environ.get("REDIS_BIDASK_TTL", "0"))  # 0=永不过期
 
 # Zookeeper (Kafka 底层依赖，生产者一般不直接连)

@@ -67,36 +67,43 @@ def create_kafka_producer():
                 raise
 
 
-# Redis 独占字段（不进 Kafka）
-REDIS_ONLY_FIELDS = [
+# Kafka 15 字段（不含 Redis 独占字段）
+KAFKA_FIELDS = [
+    "code", "name", "price", "open", "high", "low", "prev_close",
+    "change_amt", "change_pct", "volume", "amount",
+    "trade_date", "trade_time", "event_time", "source",
+]
+
+# Redis 25 字段
+REDIS_FIELDS = [
     "bid", "ask",
     "b1_v", "b1_p", "b2_v", "b2_p", "b3_v", "b3_p", "b4_v", "b4_p", "b5_v", "b5_p",
     "s1_v", "s1_p", "s2_v", "s2_p", "s3_v", "s3_p", "s4_v", "s4_p", "s5_v", "s5_p",
     "status",
+    "trade_date", "trade_time",
 ]
-
-# Redis + Kafka 共享字段（两边都写，不从 row 中 pop）
-SHARED_FIELDS = ["trade_date", "trade_time"]
 
 
 def send_to_kafka(producer, redis_client, rows):
-    """推送一轮数据：15 字段 → Kafka，盘口+bid/ask 等 → Redis"""
+    """推送一轮数据：15 字段 → Kafka，25 字段 → Redis，不修改输入 rows"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     pipe = redis_client.pipeline() if redis_client else None
 
     for row in rows:
-        row["event_time"] = now
-        row["source"] = config.SOURCE_TYPE
-
         code = row.get("code", "")
 
-        # Redis 独占字段（pop 掉不进 Kafka）
-        redis_data = {}
-        for field in REDIS_ONLY_FIELDS:
-            redis_data[field] = row.pop(field, "")
-        # 共享字段（复制，不 pop）
-        for field in SHARED_FIELDS:
-            redis_data[field] = row.get(field, "")
+        # 构造两个新 dict，不 mutate 原始 row
+        kafka_data = {f: row.get(f, "") for f in KAFKA_FIELDS}
+        kafka_data["event_time"] = now
+        kafka_data["source"] = config.SOURCE_TYPE
+        # 数值字段确保类型正确
+        for f in ["price", "open", "high", "low", "prev_close", "change_amt", "change_pct", "volume", "amount"]:
+            kafka_data[f] = float(row.get(f, 0))
+
+        redis_data = {f: row.get(f, "") for f in REDIS_FIELDS}
+        # bid/ask 确保 float
+        redis_data["bid"] = float(row.get("bid", 0))
+        redis_data["ask"] = float(row.get("ask", 0))
 
         if pipe:
             key = f"stock:quote:{code}"
@@ -106,8 +113,7 @@ def send_to_kafka(producer, redis_client, rows):
             else:
                 pipe.set(key, val)
 
-        # 15 字段推 Kafka（包含 trade_date, trade_time）
-        producer.send(config.TOPIC, value=row, key=code.encode("utf-8"))
+        producer.send(config.TOPIC, value=kafka_data, key=code.encode("utf-8"))
 
     producer.flush()
     if pipe:
