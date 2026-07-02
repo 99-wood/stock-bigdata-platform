@@ -62,6 +62,7 @@ dist/
 
 # Sensitive config (real credentials, NOT committed)
 **/application.properties
+**/application-dev.yml
 *credentials*
 *.pem
 *.p12

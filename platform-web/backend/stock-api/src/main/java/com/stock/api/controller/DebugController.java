@@ -3,6 +3,7 @@ package com.stock.api.controller;
 import com.stock.api.common.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.*;
 
 @Slf4j
+@Profile("dev")
 @RestController
 @RequestMapping("/api/debug")
 @RequiredArgsConstructor

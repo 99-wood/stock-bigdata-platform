@@ -65,7 +65,7 @@ public class RedisService {
             if (totalVolume != null) dto.setTotalVolume(Long.parseLong(totalVolume));
 
             String totalAmount = getStringValue(entries, "total_amount");
-            if (totalAmount != null) dto.setTotalAmount(Long.parseLong(totalAmount));
+            if (totalAmount != null) dto.setTotalAmount(Double.parseDouble(totalAmount));
 
             return dto;
         } catch (Exception e) {
@@ -218,7 +218,7 @@ public class RedisService {
         for (int i = 0; i < codes.size(); i++) {
             String json = (i < jsonList.size()) ? jsonList.get(i) : null;
             if (json == null || json.isEmpty()) {
-                log.debug("Skipping rank item with missing stock data for code: {}", codes.get(i));
+                log.warn("Skipping rank item with missing stock data for code: {}", codes.get(i));
                 continue;
             }
             try {
@@ -330,8 +330,9 @@ public class RedisService {
     }
 
     /**
-     * Search stocks by code or name keyword.
-     * @param keyword search keyword (matches code or name, case-insensitive)
+     * Search stocks by code keyword (case-insensitive).
+     * Name lookup is not supported — use MySQL dim_stock for name queries.
+     * @param keyword search keyword (matches code, case-insensitive)
      * @return matching stocks sorted by code
      */
     public List<StockLatestDTO> searchStocks(String keyword) {
@@ -347,14 +348,25 @@ public class RedisService {
     }
 
     /**
-     * Get latest trade time by scanning any stock:quote:* key.
+     * Get latest trade time by scanning any stock:quote:* key via SCAN.
      * Returns "yyyy-MM-dd HH:mm:ss" or null if no data available.
      */
     public String getLatestTradeTime() {
         try {
-            Set<String> keys = stringRedisTemplate.keys(KEY_STOCK_LATEST_PREFIX + "*");
-            if (keys == null || keys.isEmpty()) return null;
-            String json = stringRedisTemplate.opsForValue().get(keys.iterator().next());
+            // SCAN instead of KEYS to avoid blocking Redis
+            ScanOptions options = ScanOptions.scanOptions()
+                    .match(KEY_STOCK_LATEST_PREFIX + "*")
+                    .count(1)
+                    .build();
+            String firstKey = null;
+            try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
+                if (cursor.hasNext()) {
+                    firstKey = cursor.next();
+                }
+            }
+            if (firstKey == null) return null;
+
+            String json = stringRedisTemplate.opsForValue().get(firstKey);
             if (json == null) return null;
             StockLatestDTO stock = objectMapper.readValue(json, StockLatestDTO.class);
             if (stock.getTradeDate() != null && stock.getTradeTime() != null) {

@@ -60,15 +60,12 @@ stock:{category}:{identifier}
 | `flat_count` | int | `326` | 平盘家数（change_pct = 0） |
 | `avg_change_pct` | double | `0.38` | 平均涨跌幅 % |
 | `total_volume` | long | `384920100` | 全市场总成交量（手） |
-| `total_amount` | long | `5238491200` | 全市场总成交额（万元），取整 |
+| `total_amount` | double | `5238491200.50` | 全市场总成交额（万元） |
 
 **写入示例 (Redis CLI):**
 ```
-HSET stock:market:summary stat_time "2026-07-02 14:30:00" total_stocks 4521 up_count 2180 down_count 2015 flat_count 326 avg_change_pct 0.38 total_volume 384920100 total_amount 5238491200
+HSET stock:market:summary stat_time "2026-07-02 14:30:00" total_stocks 4521 up_count 2180 down_count 2015 flat_count 326 avg_change_pct 0.38 total_volume 384920100 total_amount 5238491200.50
 ```
-
-> 📐 **扩展点**: 若后续成交额需要小数精度，`total_amount` 可改为 double/string 存储（如 `"5238491200.50"`），
-> 写入方更新即可，读取方 `MarketSummaryDTO.totalAmount` 同步改为 `Double`。
 
 ---
 
@@ -322,7 +319,7 @@ LRANGE stock:alert:latest 0 49
 | DTO | Schema 匹配 | 备注 |
 |-----|-----------|------|
 | `StockLatestDTO` | ✅ 匹配 | Level-2 五档（bid/ask/b1_p~b5_p/s1_p~s5_p），code 从 key 提取 |
-| `MarketSummaryDTO` | ✅ 匹配 | `totalAmount` 当前为 `Long`（取整），如需小数精度见 §3.1 扩展点 |
+| `MarketSummaryDTO` | ✅ 匹配 | `totalAmount` 已改为 `Double`，匹配数据源 |
 | `RankItemDTO` | ✅ 匹配 | bid/ask/tradeDate/tradeTime/score/status，score 来自 ZSET |
 | `AlertDTO` | ✅ 匹配 | alert_type/code/name/curr_value/threshold/event_time |
 

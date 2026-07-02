@@ -20,5 +20,5 @@ public class MarketSummaryDTO {
     @JsonProperty("total_volume")
     private Long totalVolume;
     @JsonProperty("total_amount")
-    private Long totalAmount;
+    private Double totalAmount;
 }
