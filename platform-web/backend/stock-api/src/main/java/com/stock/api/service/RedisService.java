@@ -263,12 +263,7 @@ public class RedisService {
                     codes.size(), codes.stream().limit(5).collect(Collectors.toList()));
 
             if (codes.isEmpty()) {
-                // Fallback: try KEYS command to confirm the pattern
-                Set<String> fallbackKeys = stringRedisTemplate.keys(KEY_STOCK_LATEST_PREFIX + "*");
-                log.warn("SCAN returned empty, but KEYS stock:quote:* found {} keys. " +
-                         "Redis total keys (KEYS *): {}",
-                         fallbackKeys != null ? fallbackKeys.size() : 0,
-                         stringRedisTemplate.keys("*") != null ? stringRedisTemplate.keys("*").size() : 0);
+                log.warn("SCAN stock:quote:* returned no keys");
                 return Collections.emptyList();
             }
 
