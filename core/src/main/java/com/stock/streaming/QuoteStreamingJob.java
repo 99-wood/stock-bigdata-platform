@@ -105,6 +105,13 @@ public class QuoteStreamingJob {
             // ads_market_summary —— 市场概览
             MarketSummaryWriter.write(spark, quoteDF);
 
+            // HDFS DWD 落盘 —— 离线团队的入口，按 tradeDate 分区
+            quoteDF.write()
+                    .mode("append")
+                    .partitionBy("tradeDate")
+                    .parquet(Config.hdfsUri() + Config.hdfsDwdPath());
+            LOG.info("DWD 落盘完成, 共 {} 条", parsedRDD.count());
+
             // 手动提交 offset 到 Kafka
             OffsetRange[] offsetRanges = ((HasOffsetRanges) rdd.rdd()).offsetRanges();
             ((CanCommitOffsets) stream.inputDStream()).commitAsync(offsetRanges);
