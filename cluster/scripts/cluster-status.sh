@@ -10,6 +10,14 @@
 MID_HOST=${MID_HOST:-mid}
 THIS_HOST=$(hostname 2>/dev/null || echo "")
 
+# 中间件连接信息 —— 在 /etc/profile 或 .bashrc 中设置，避免硬编码在脚本里
+#   export REDIS_PASSWORD=your_password
+#   export MYSQL_USER=stock_admin
+#   export MYSQL_PASSWORD=your_password
+REDIS_PASSWORD=${REDIS_PASSWORD:-}
+MYSQL_USER=${MYSQL_USER:-stock_admin}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+
 # ---------- 工具函数 ----------
 # 本地执行或 SSH 到远程执行
 run() {
@@ -43,8 +51,8 @@ echo ""
 echo "--- mid (中间件) ---"
 check "$MID_HOST" "Zookeeper  (2181)" 'echo stat | nc -w 1 localhost 2181 2>/dev/null | head -1'
 check "$MID_HOST" "Kafka      (9092)" 'export JAVA_HOME=/root/jdk1.8.0_171 && ss -tlnp | grep -q 9092 && echo ok'
-check "$MID_HOST" "Redis      (6379)" 'redis-cli -a " " PING 2>/dev/null | grep -q PONG && echo ok'
-check "$MID_HOST" "MySQL      (3306)" 'mysqladmin -uroot -p" " ping 2>/dev/null | grep -q alive && echo ok'
+check "$MID_HOST" "Redis      (6379)" "redis-cli -a \"$REDIS_PASSWORD\" PING 2>/dev/null | grep -q PONG && echo ok"
+check "$MID_HOST" "MySQL      (3306)" "mysqladmin -u\"$MYSQL_USER\" -p\"$MYSQL_PASSWORD\" ping 2>/dev/null | grep -q alive && echo ok"
 
 echo ""
 echo "--- master0 (主节点) ---"
