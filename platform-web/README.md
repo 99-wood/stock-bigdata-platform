@@ -119,8 +119,8 @@ platform-web/
 
 | Key | 类型 | 读取方 DTO | 说明 |
 |-----|------|----------|------|
-| `stock:quote:{code}` | String (JSON) | `StockLatestDTO` | 个股 Level-2 五档行情，无 TTL |
-| `stock:market:summary` | Hash | `MarketSummaryDTO` | 市场概览 8 字段 |
+| `stock:quote:{code}` | String (JSON) | `StockLatestDTO` | 个股 Level-2 五档行情，TTL 300s |
+| `stock:market:summary` | Hash | `MarketSummaryDTO` | 市场概览 8 字段，TTL 3600s |
 | `stock:rank:up` | ZSet | `RankItemDTO` | 涨幅榜，score = `change_pct` |
 | `stock:rank:down` | ZSet | `RankItemDTO` | 跌幅榜，score = `change_pct` |
 | `stock:rank:amount` | ZSet | `RankItemDTO` | 成交额榜，score = `amount` |
