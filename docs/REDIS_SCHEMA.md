@@ -80,8 +80,8 @@ HSET stock:market:summary stat_time "2026-07-02 14:30:00" total_stocks 4521 up_c
 
 **实现说明：**
 
-- Level-2 五档（bid/ask/b1~b5）由 **data_gen** 直写 Redis，Spark Streaming Consumer 负责 **OHLCV v2 扩展字段**
-- 两部分写入同一个 key `stock:quote:{code}`，字段不冲突（Jackson `ignoreUnknown=true`）
+- `stock:quote:{code}` 由 **data_gen** 单一写入方负责，避免多写入方 SET 互相覆盖
+- Spark Streaming Consumer 不写此 key（OHLCV 数据通过 MySQL/HDFS 提供）
 
 **当前 JSON Schema（v1 — Level-2 五档，data_gen 写入）:**
 
@@ -132,9 +132,9 @@ HSET stock:market:summary stat_time "2026-07-02 14:30:00" total_stocks 4521 up_c
 > ⚠️ **code 不在 JSON 内**：code 从 Redis key 中提取。
 > 例如 `stock:quote:sh600519` → `code = "sh600519"`，由 `RedisService` set 到 DTO 上。
 
-**📐 v2 扩展字段（Spark Streaming Consumer 写入 — OHLCV）：**
+**📐 v2 扩展字段（OHLCV，待定写入方）：**
 
-以下字段由 Spark Streaming Consumer 写入，与 v1 五档字段共存（向后兼容）：
+以下字段为日线分析/K 线图预留，写入方待定（独立 key `stock:quote:ohlcv:{code}` 或由 data_gen 追加）：
 
 ```json
 {

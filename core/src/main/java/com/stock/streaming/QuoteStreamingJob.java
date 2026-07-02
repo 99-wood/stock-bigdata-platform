@@ -132,9 +132,6 @@ public class QuoteStreamingJob {
                 // ads_market_summary —— 市场概览
                 MarketSummaryWriter.write(spark, quoteDF);
 
-                // 个股实时快照 —— Redis stock:quote:{code}
-                StockQuoteWriter.write(parsedRDD);
-
                 // HDFS DWD 落盘 —— 离线团队的入口
                 quoteDF.write()
                         .mode("append")
