@@ -46,7 +46,11 @@ public final class Config {
     }
 
     private static int getInt(String key) {
-        return Integer.parseInt(get(key));
+        String value = get(key);
+        if (value == null) {
+            throw new IllegalStateException("Missing required config: " + key);
+        }
+        return Integer.parseInt(value);
     }
 
     // ==================== Kafka ====================

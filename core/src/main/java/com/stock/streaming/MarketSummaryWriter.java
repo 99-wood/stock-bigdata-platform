@@ -61,13 +61,13 @@ public final class MarketSummaryWriter {
                 ") stock_snapshot"
         );
 
-        long total = summary.first().getLong(0);
+        // fix #5: first() 只调用一次
+        Row r = summary.first();
+        long total = r.getLong(0);
         if (total == 0) {
             LOG.info("市场概览: 本批次无有效股票");
             return;
         }
-
-        Row r = summary.first();
 
         // 1. 写入 Redis（实时查询，覆盖旧值）
         writeRedis(r);
