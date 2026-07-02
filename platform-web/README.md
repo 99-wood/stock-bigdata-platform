@@ -110,128 +110,25 @@ platform-web/
 
 ### 4.1 Redis（实时数据，Spark Streaming / Spark SQL 写入）
 
-> **全局约定**
->
-> - 时间格式：`yyyy-MM-dd HH:mm:ss`（北京时间 UTC+8）
-> - 股票代码格式：市场前缀 + 数字，如 `sh600519`
-> - **单位转换由 Spark Streaming 负责**：volume 股→手（÷100）、amount 元→万元（÷10000），后端读到即最终值
-> - `stock:quote:{code}` 设 TTL 120s，Spark 每轮 SETEX 写入时刷新
+> Redis 数据格式的完整定义见 **[docs/REDIS_SCHEMA.md](../../docs/REDIS_SCHEMA.md)**，以下仅列出 key 清单和本模块的消费关系。
 
-#### 4.1.1 `stock:quote:{code}` — 个股最新行情
+**全局约定：**
+- 时间格式：`yyyy-MM-dd HH:mm:ss`（北京时间 UTC+8）
+- 股票代码格式：市场前缀 + 数字，如 `sh600519`
+- Redis 不存 `name`，前端需要名称时用 code 去 MySQL `dim_stock` 查
 
-- **类型**：String (JSON)
-- **写入方**：Spark Streaming，每轮采集（~30s）
-- **写入命令**：`SETEX stock:quote:sh600519 120 '<json>'`
-- **读取命令**：`GET stock:quote:sh600519`
-- **TTL**：120s
+| Key | 类型 | 读取方 DTO | 说明 |
+|-----|------|----------|------|
+| `stock:quote:{code}` | String (JSON) | `StockLatestDTO` | 个股 Level-2 五档行情，无 TTL |
+| `stock:market:summary` | Hash | `MarketSummaryDTO` | 市场概览 8 字段 |
+| `stock:rank:up` | ZSet | `RankItemDTO` | 涨幅榜，score = `change_pct` |
+| `stock:rank:down` | ZSet | `RankItemDTO` | 跌幅榜，score = `change_pct` |
+| `stock:rank:amount` | ZSet | `RankItemDTO` | 成交额榜，score = `amount` |
+| `stock:rank:quant` | ZSet | `RankItemDTO` | 量化评分榜，score = `quant_score` |
+| `stock:alert:latest` | List | `AlertDTO` | 最新预警，LPUSH + LTRIM |
+| `stock:hot:5m` | ZSet | （P2 暂不开发） | 用户关注热度，score = 热度指数 |
 
-| 字段 | 类型 | 说明 | Kafka→Redis 转换 |
-|------|------|------|-----------------|
-| `name` | String | 股票名称 | 透传 |
-| `price` | Number | 最新成交价（元） | 透传 |
-| `open` | Number | 今日开盘价（元） | 透传 |
-| `high` | Number | 今日最高价（元） | 透传 |
-| `low` | Number | 今日最低价（元） | 透传 |
-| `prev_close` | Number | 昨日收盘价（元） | 透传 |
-| `change_amt` | Number | 涨跌额（元） | 透传 |
-| `change_pct` | Number | 涨跌幅（%），`1.25` = +1.25% | 透传 |
-| `volume` | Number | 成交量（**手**） | **÷100**（Kafka 存股） |
-| `amount` | Number | 成交额（**万元**） | **÷10000**（Kafka 存元） |
-| `event_time` | String | 采集时间 `yyyy-MM-dd HH:mm:ss` | 透传 |
-| `source` | String | 数据来源，`sina` 或 `jsonl` | 透传 |
-
-> `code` 不在 JSON 内——股票代码已编码在 Key 中（`stock:quote:sh600519`），后端从 Key 解析即可。
-
-> Kafka 消息还包含 `bid`、`ask`、`trade_date`、`trade_time` 四个字段，前端展示不需要，不写入此 Key。
-
-**示例**：
-
-```json
-{
-  "name": "贵州茅台",
-  "price": 1194.96,
-  "open": 1169.00,
-  "high": 1215.00,
-  "low": 1151.01,
-  "prev_close": 1168.63,
-  "change_amt": 26.33,
-  "change_pct": 2.25,
-  "volume": 66878,
-  "amount": 794924,
-  "event_time": "2026-06-30 10:30:00",
-  "source": "sina"
-}
-```
-
-#### 4.1.2 `stock:rank:up` / `stock:rank:down` / `stock:rank:amount` / `stock:rank:quant` — 四大榜单
-
-- **类型**：ZSet（有序集合）
-- **Member**：股票代码（如 `sh600519`）
-- **写入方式**：每批次 `DEL` + `ZADD` 全量刷新
-- **后端组装流程**：`ZREVRANGE`/`ZRANGE` 取 code 列表 → 批量 `MGET stock:quote:{code}` 补全 name/price → 返回前端
-
-| Key | 写入方 | Score | 读取命令 | 说明 |
-|-----|--------|-------|---------|------|
-| `stock:rank:up` | Spark Streaming | `change_pct` | `ZREVRANGE 0 19 WITHSCORES` | 涨幅榜，score 降序 |
-| `stock:rank:down` | Spark Streaming | `change_pct` | `ZRANGE 0 19 WITHSCORES` | 跌幅榜，score 升序 |
-| `stock:rank:amount` | Spark Streaming | `amount`（万元） | `ZREVRANGE 0 19 WITHSCORES` | 成交额榜，score 降序 |
-| `stock:rank:quant` | Spark SQL 离线 | `quant_score`（0-100） | `ZREVRANGE 0 19 WITHSCORES` | 量化评分榜，每 5 分钟更新 |
-
-#### 4.1.3 `stock:market:summary` — 市场概览
-
-- **类型**：Hash
-- **写入方**：Spark Streaming，每轮采集（~30s）
-- **读取命令**：`HGETALL stock:market:summary`
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `stat_time` | String | 统计时间，`yyyy-MM-dd HH:mm:ss` |
-| `total_stocks` | Integer | 有效股票总数 |
-| `up_count` | Integer | 上涨家数（change_pct > 0） |
-| `down_count` | Integer | 下跌家数（change_pct < 0） |
-| `flat_count` | Integer | 平盘家数（change_pct = 0） |
-| `avg_change_pct` | Float | 全市场平均涨跌幅（%） |
-| `total_volume` | Long | 全市场总成交量（**手**） |
-| `total_amount` | Long | 全市场总成交额（**万元**） |
-
-> Hash 中数值字段实际存储为字符串（Redis 特性），后端读取后自行 `Long.parseLong()` / `Double.parseDouble()` 转换。
-
-#### 4.1.4 `stock:alert:latest` — 最新预警消息
-
-- **类型**：List
-- **写入方**：Spark Streaming，预警触发时 `LPUSH` + `LTRIM 0 99`
-- **读取命令**：`LRANGE stock:alert:latest 0 49`（取最近 50 条）
-
-每条元素为 JSON 字符串：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `alert_type` | String | `pct_up` / `pct_down` / `volume_surge` / `price_breakout` |
-| `code` | String | 股票代码 |
-| `name` | String | 股票名称 |
-| `curr_value` | Number | 当前触发值 |
-| `threshold` | Number | 触发阈值 |
-| `event_time` | String | 触发时间 `yyyy-MM-dd HH:mm:ss` |
-
-**示例**：
-
-```json
-{
-  "alert_type": "pct_up",
-  "code": "sh600519",
-  "name": "贵州茅台",
-  "curr_value": 6.25,
-  "threshold": 5.0,
-  "event_time": "2026-06-30 10:30:00"
-}
-```
-
-#### 4.1.5 `stock:hot:5m` — 用户关注热度（P2，暂不开发）
-
-- **类型**：ZSet
-- **Score**：热度指数（0-100），Member = 股票代码
-- **写入方**：Spark Streaming（消费 Kafka `stock_user_event_raw`）
-- **读取命令**：`ZREVRANGE stock:hot:5m 0 19 WITHSCORES`
+> `code` 不在 `stock:quote:{code}` 的 JSON 内，从 Redis key 提取。
 
 ---
 
@@ -264,7 +161,7 @@ platform-web/
 | `/api/stocks/top-up` | GET | Redis `stock:rank:up` + MGET 补全 | 涨幅榜 Top 20 |
 | `/api/stocks/top-down` | GET | Redis `stock:rank:down` + MGET 补全 | 跌幅榜 Top 20 |
 | `/api/stocks/top-amount` | GET | Redis `stock:rank:amount` + MGET 补全 | 成交额榜 Top 20 |
-| `/api/stocks/{code}` | GET | Redis `stock:quote:{code}` | 个股实时行情 12 字段 + code 从 Key 解析 |
+| `/api/stocks/{code}` | GET | Redis `stock:quote:{code}` | 个股实时行情（Level-2 五档），code 从 Key 解析 |
 | `/api/alerts/latest` | GET | Redis `stock:alert:latest` | 最近 50 条预警 |
 
 ### P1 — 历史数据（依赖 C 离线数仓灌入 MySQL stock_ads）
@@ -436,18 +333,3 @@ platform:
 > 本地开发可用 Docker Compose 启动 Redis + MySQL，见项目根目录 `docker-compose.yml`。
 
 ---
-
-## 12. 参考文档
-
-| 文档 | 路径 |
-|------|------|
-| Redis 接口契约 | `../stock-bigdata-platform-docs/08-redis-interface-contract.md` |
-| 数据流与存储 | `../stock-bigdata-platform-docs/02-data-flow-and-storage.md` |
-| 模块与接口设计 | `../stock-bigdata-platform-docs/03-module-interface-design.md` |
-| 数据库表设计 | `../stock-bigdata-platform-docs/07-database-design.md` |
-| 需求分析 | `../stock-bigdata-platform-docs/06-requirements-analysis.md` |
-| 团队分工 | `../stock-bigdata-platform-docs/05-team-task-assignment.md` |
-| Git 协作规范 | `../GIT_COLLABORATION_GUIDE.md` |
-| MySQL DDL | `../cluster/sql/sqlinit.txt` |
-| 量化权重配置 | `../cluster/config/quant-weight.properties` |
-| 采集器文档 | `../data_gen/README.md` |
