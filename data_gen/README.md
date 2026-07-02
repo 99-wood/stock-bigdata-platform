@@ -99,7 +99,7 @@ docker stop stock_collector
 
 ### Redis 直写字段（不进 Kafka）
 
-**Key**: `stock:quote:{code}`，TTL 120s，JSON 格式
+**Key**: `stock:quote:{code}`，无过期，JSON 格式
 
 | 分类 | 字段 | 类型 | 说明 |
 |------|------|------|------|
@@ -152,7 +152,7 @@ docker stop stock_collector
 
 同步写入 Redis：
 ```
-SETEX stock:quote:sh600519 120 '{"bid":1171.57,"ask":1171.59,"trade_date":"2026-07-01","trade_time":"09:46:32","b1_v":"600","b1_p":"1171.57","b2_v":"100","b2_p":"1171.46",...}'
+SET stock:quote:sh600519 '{"bid":1171.57,"ask":1171.59,"trade_date":"2026-07-01","trade_time":"09:46:32","b1_v":"600","b1_p":"1171.57","b2_v":"100","b2_p":"1171.46",...}'
 ```
 
 ---
@@ -177,21 +177,22 @@ SETEX stock:quote:sh600519 120 '{"bid":1171.57,"ask":1171.59,"trade_date":"2026-
 ```
 data_gen/
 ├── Dockerfile                  ← Python 3.11 镜像 + 依赖安装
-├── requirements.txt            ← requests, kafka-python, urllib3, redis
+├── Dockerfile.web              ← Web 控制台镜像
+├── requirements.txt            ← requests, kafka-python, redis, flask, docker
 ├── config.py                   ← Kafka / Redis / 数据源配置
 ├── stock_collector.py          ← 主入口，调度循环 → Kafka + Redis
-├── db_to_kafka.py              ← SQLite DB 回放工具（备用）
-├── check_db.py                 ← SQLite 数据查看工具
+├── web_ui.py                   ← Web 控制台（Flask）
+├── valid_codes.txt             ← 有效 A 股代码列表
 ├── sources/
 │   ├── __init__.py             ← 数据源工厂 create_source()
 │   ├── base.py                 ← BaseSource 抽象基类
 │   ├── sina_api.py             ← 新浪 API 源（HTTP 批量拉取）
 │   └── jsonl_file.py           ← JSONL 文件源（历史回放）
 ├── jsonl/                      ← JSONL 数据文件（不提交 git）
-│   └── 20260630.jsonl          ← ~142 MB
-├── snapshots.db                ← SQLite 数据（不提交 git, 118 MB）
+│   └── 20260630.jsonl
 └── scripts/
-    └── kafka-clear.sh          ← Kafka topic 清空脚本
+    ├── build.sh                 ← 构建镜像
+    └── run.sh                   ← 快速启动
 ```
 
 ## 扩展新数据源

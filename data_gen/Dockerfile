@@ -15,6 +15,4 @@ COPY config.py .
 COPY valid_codes.txt .
 COPY sources/ ./sources/
 COPY stock_collector.py .
-COPY db_to_kafka.py .
-
 CMD ["python", "stock_collector.py"]
