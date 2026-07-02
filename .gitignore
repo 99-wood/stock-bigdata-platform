@@ -5,10 +5,26 @@
 *.swp
 *.swo
 *~
+.settings/
+.project
+.classpath
+.factorypath
+
+# Claude Code
+.claude/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Temp / Backup
+*.tmp
+*.bak
+*.orig
+*.pid
+
+# Cache
+.cache/
 
 # Python
 __pycache__/
@@ -30,7 +46,6 @@ derby.log
 spark-warehouse/
 
 # Hadoop / HDFS
-*.log
 logs/
 
 # Kafka
@@ -47,3 +62,18 @@ dist/
 
 # Sensitive config (real credentials, NOT committed)
 **/application.properties
+**/application-dev.yml
+*credentials*
+*.pem
+*.p12
+*.jks
+*.keystore
+*.truststore
+
+# Local overrides
+*.local.*
+
+# Project-specific (not for commit)
+GIT_COLLABORATION_GUIDE.md
+README2.md
+stock-bigdata-platform-docs/

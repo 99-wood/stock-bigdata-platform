@@ -1,0 +1,26 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: stock-api
+  data:
+    redis:
+      host: 192.168.137.210
+      port: 6379
+      password: ${REDIS_PASSWORD:}
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+
+platform:
+  push:
+    interval: 5000
+
+logging:
+  level:
+    com.stock.api: INFO
