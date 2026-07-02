@@ -72,7 +72,7 @@ public class QuoteStreamingJob {
         kafkaParams.put("key.deserializer", StringDeserializer.class);
         kafkaParams.put("value.deserializer", StringDeserializer.class);
         kafkaParams.put("group.id", Config.kafkaGroupId());
-        kafkaParams.put("auto.offset.reset", "latest");  // fix #6: 生产用 latest，避免全量重放
+        kafkaParams.put("auto.offset.reset", "latest");  // 生产用 latest，避免全量重放
         kafkaParams.put("enable.auto.commit", false);
 
         Collection<String> topics = Collections.singletonList(Config.kafkaTopic());
@@ -129,7 +129,10 @@ public class QuoteStreamingJob {
                 // dim_stock —— 新股票代码
                 DimWriter.updateDimStock(spark, quoteDF);
 
-                // ads_market_summary —— 市场概览
+                // 全市场状态追踪: 更新 Redis 状态 → 市场概览 + 排行榜
+                MarketStateTracker.updateAndPublish(parsedRDD);
+
+                // MySQL 兜底
                 MarketSummaryWriter.write(spark, quoteDF);
 
                 // HDFS DWD 落盘 —— 离线团队的入口
