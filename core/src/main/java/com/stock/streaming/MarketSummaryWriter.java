@@ -21,7 +21,7 @@ import java.util.Properties;
 public final class MarketSummaryWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(MarketSummaryWriter.class);
-    private static final String REDIS_KEY = "ads:market_summary";
+    private static final String REDIS_KEY = "stock:market:summary";
 
     private MarketSummaryWriter() {
     }
@@ -86,20 +86,21 @@ public final class MarketSummaryWriter {
     }
 
     /**
-     * 写入 Redis，Key 固定为 ads:market_summary，每次覆盖
+     * 写入 Redis Hash: stock:market:summary
+     * 每次 HSET 覆盖更新（对齐 REDIS_SCHEMA §3.1）
      */
     private static void writeRedis(Row r) {
-        String json = String.format(
-                "{\"stat_time\":\"%s\",\"total_stocks\":%d,\"up_count\":%d,\"down_count\":%d," +
-                "\"flat_count\":%d,\"avg_change_pct\":%.4f,\"total_volume\":%d,\"total_amount\":%.4f}",
-                r.getTimestamp(7), r.getLong(0), r.getLong(1), r.getLong(2),
-                r.getLong(3), r.getDouble(4), r.getLong(5), r.getDouble(6)
-        );
-
         try (Jedis jedis = new Jedis(Config.redisHost(), Config.redisPort(), 3000)) {
             jedis.auth(Config.redisPassword());
-            jedis.set(REDIS_KEY, json);
-            jedis.expire(REDIS_KEY, 3600);  // 1 小时过期
+            jedis.hset(REDIS_KEY, "stat_time", r.getTimestamp(7).toString());
+            jedis.hset(REDIS_KEY, "total_stocks", String.valueOf(r.getLong(0)));
+            jedis.hset(REDIS_KEY, "up_count", String.valueOf(r.getLong(1)));
+            jedis.hset(REDIS_KEY, "down_count", String.valueOf(r.getLong(2)));
+            jedis.hset(REDIS_KEY, "flat_count", String.valueOf(r.getLong(3)));
+            jedis.hset(REDIS_KEY, "avg_change_pct", String.valueOf(r.getDouble(4)));
+            jedis.hset(REDIS_KEY, "total_volume", String.valueOf(r.getLong(5)));
+            jedis.hset(REDIS_KEY, "total_amount", String.valueOf(r.getDouble(6)));
+            jedis.expire(REDIS_KEY, 3600);
             LOG.info("Redis 写入成功");
         } catch (Exception e) {
             LOG.warn("Redis 写入失败: {}", e.getMessage());
