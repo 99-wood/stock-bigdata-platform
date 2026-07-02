@@ -98,11 +98,14 @@ public class QuoteStreamingJob {
             List<StockQuote> sample = parsedRDD.take(3);
             sample.forEach(q -> LOG.info("收到行情: {}", q));
 
-            // dim_stock —— 新股票代码 INSERT IGNORE
+            // dim_stock —— 新股票代码
             Dataset<Row> quoteDF = spark.createDataFrame(parsedRDD, StockQuote.class);
             DimWriter.updateDimStock(spark, quoteDF);
 
-            // 手动提交 offset 到 Kafka，LAG 可视化 + 重启恢复
+            // ads_market_summary —— 市场概览
+            MarketSummaryWriter.write(spark, quoteDF);
+
+            // 手动提交 offset 到 Kafka
             OffsetRange[] offsetRanges = ((HasOffsetRanges) rdd.rdd()).offsetRanges();
             ((CanCommitOffsets) stream.inputDStream()).commitAsync(offsetRanges);
 

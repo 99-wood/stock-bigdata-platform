@@ -39,8 +39,8 @@ public final class DimWriter {
         props.setProperty("user", Config.mysqlUser());
         props.setProperty("password", Config.mysqlPassword());
 
-        // 1. 从行情数据中提取 code + name + market，去重
-        quoteDF.select("code", "name").distinct().createOrReplaceTempView("tmp_new_codes");
+        // 1. 从行情数据中提取 code + name + market，按 code 去重（同一 code 只保留一条）
+        quoteDF.select("code", "name").dropDuplicates("code").createOrReplaceTempView("tmp_new_codes");
 
         Dataset<Row> newDimDF = spark.sql(
                 "SELECT code, name, " +
@@ -56,7 +56,7 @@ public final class DimWriter {
         // 2. 注册新股票视图
         newDimDF.createOrReplaceTempView("new_stocks");
 
-        // 3. 读取 dim_stock 已有 code，注册视图
+        // 3. 读取 dim_stock 已有 code
         Dataset<Row> existingCodes;
         try {
             existingCodes = spark.read()
@@ -65,14 +65,19 @@ public final class DimWriter {
         } catch (Exception e) {
             existingCodes = spark.emptyDataFrame();
         }
-        existingCodes.createOrReplaceTempView("existing_stocks");
 
-        // 4. LEFT ANTI JOIN 排除已存在的 code
-        Dataset<Row> toInsert = spark.sql(
-                "SELECT n.code, n.name, n.market " +
-                "FROM new_stocks n " +
-                "LEFT ANTI JOIN existing_stocks e ON n.code = e.code"
-        );
+        // 4. 排除已存在的 code（表为空时跳过 JOIN）
+        Dataset<Row> toInsert;
+        if (existingCodes.isEmpty()) {
+            toInsert = newDimDF;
+        } else {
+            existingCodes.createOrReplaceTempView("existing_stocks");
+            toInsert = spark.sql(
+                    "SELECT n.code, n.name, n.market " +
+                    "FROM new_stocks n " +
+                    "LEFT ANTI JOIN existing_stocks e ON n.code = e.code"
+            );
+        }
 
         long newCount = toInsert.count();
         if (newCount > 0) {
