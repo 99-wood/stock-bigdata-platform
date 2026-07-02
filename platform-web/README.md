@@ -1,6 +1,8 @@
-# platform-web — 可视化与后端模块
+﻿# platform-web — 可视化与后端模块
 
 > 本模块负责 SpringBoot 后端 API 和 Vue 3 前端展示，聚合 Redis 实时数据和 MySQL 历史数据，为数据大屏和管理后台提供数据服务。
+
+> Redis 实时数据契约见 [../docs/REDIS_SCHEMA.md](../docs/REDIS_SCHEMA.md)。
 
 ---
 
