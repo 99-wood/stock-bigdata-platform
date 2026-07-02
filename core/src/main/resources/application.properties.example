@@ -18,7 +18,7 @@ hdfs.dwd.path=/stock/dwd/quote_clean
 hdfs.checkpoint.path=/stock/checkpoint/streaming
 
 # ------- MySQL -------
-mysql.url=jdbc:mysql://192.168.137.210:3306/stock_ads?useUnicode=true&characterEncoding=utf8
+mysql.url=jdbc:mysql://192.168.137.210:3306/stock_ads?useUnicode=true&characterEncoding=utf8&useSSL=false
 mysql.user=请填写用户名
 mysql.password=请填写密码
 

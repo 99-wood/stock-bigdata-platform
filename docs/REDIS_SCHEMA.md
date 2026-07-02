@@ -46,7 +46,7 @@ stock:{category}:{identifier}
 | **类型** | Hash |
 | **写入方** | Spark Streaming Consumer（实时计算，每批次 HSET） |
 | **读取方** | platform-web API → `MarketSummaryDTO` |
-| **TTL** | 无（持续覆盖） |
+| **TTL** | 0（不过期，持续覆盖） |
 | **MySQL 对应表** | `ads_market_summary` |
 
 **Hash Fields:**
@@ -76,9 +76,14 @@ HSET stock:market:summary stat_time "2026-07-02 14:30:00" total_stocks 4521 up_c
 | **类型** | String (JSON) |
 | **写入方** | Spark Streaming Consumer（从 Kafka 消费行情数据） |
 | **读取方** | platform-web API → `StockLatestDTO` |
-| **TTL** | 无（持续覆盖；可考虑收盘后保留 24h） |
+| **TTL** | 0（不过期，持续覆盖；收盘后由运维脚本批量清理） |
 
-**当前 JSON Schema（v1 — Level-2 五档）:**
+**实现说明：**
+
+- `stock:quote:{code}` 由 **data_gen** 单一写入方负责，避免多写入方 SET 互相覆盖
+- Spark Streaming Consumer 不写此 key（OHLCV 数据通过 MySQL/HDFS 提供）
+
+**当前 JSON Schema（v1 — Level-2 五档，data_gen 写入）:**
 
 ```json
 {
@@ -127,9 +132,9 @@ HSET stock:market:summary stat_time "2026-07-02 14:30:00" total_stocks 4521 up_c
 > ⚠️ **code 不在 JSON 内**：code 从 Redis key 中提取。
 > 例如 `stock:quote:sh600519` → `code = "sh600519"`，由 `RedisService` set 到 DTO 上。
 
-**📐 扩展规划（v2 — Level-1 OHLCV 兼容字段）:**
+**📐 v2 扩展字段（OHLCV，待定写入方）：**
 
-为兼容日线分析、K 线图等场景，后续可在 JSON 中**追加**以下可选字段（向后兼容，旧字段不动）：
+以下字段为日线分析/K 线图预留，写入方待定（独立 key `stock:quote:ohlcv:{code}` 或由 data_gen 追加）：
 
 ```json
 {
