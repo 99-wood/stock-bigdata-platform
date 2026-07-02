@@ -17,7 +17,7 @@ import redis.clients.jedis.Jedis;
 public final class StockQuoteWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(StockQuoteWriter.class);
-    private static final int TTL_SECONDS = 300;
+    private static final int TTL_SECONDS = 0;
 
     private StockQuoteWriter() {
     }
@@ -43,7 +43,11 @@ public final class StockQuoteWriter {
                             q.getVolume(), q.getAmount(),
                             q.getTradeDate(), q.getTradeTime()
                     );
-                    jedis.setex(key, TTL_SECONDS, json);
+                    if (TTL_SECONDS > 0) {
+                        jedis.setex(key, TTL_SECONDS, json);
+                    } else {
+                        jedis.set(key, json);
+                    }
                 }
             } catch (Exception e) {
                 LOG.warn("个股快照 Redis 写入失败: {}", e.getMessage());

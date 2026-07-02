@@ -100,7 +100,6 @@ public final class MarketSummaryWriter {
             jedis.hset(REDIS_KEY, "avg_change_pct", String.valueOf(r.getDouble(4)));
             jedis.hset(REDIS_KEY, "total_volume", String.valueOf(r.getLong(5)));
             jedis.hset(REDIS_KEY, "total_amount", String.valueOf(r.getDouble(6)));
-            jedis.expire(REDIS_KEY, 3600);
             LOG.info("Redis 写入成功");
         } catch (Exception e) {
             LOG.warn("Redis 写入失败: {}", e.getMessage());

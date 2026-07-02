@@ -46,7 +46,7 @@ stock:{category}:{identifier}
 | **类型** | Hash |
 | **写入方** | Spark Streaming Consumer（实时计算，每批次 HSET） |
 | **读取方** | platform-web API → `MarketSummaryDTO` |
-| **TTL** | 3600 秒（1 小时，防止无限积累） |
+| **TTL** | 0（不过期，持续覆盖） |
 | **MySQL 对应表** | `ads_market_summary` |
 
 **Hash Fields:**
@@ -76,7 +76,7 @@ HSET stock:market:summary stat_time "2026-07-02 14:30:00" total_stocks 4521 up_c
 | **类型** | String (JSON) |
 | **写入方** | Spark Streaming Consumer（从 Kafka 消费行情数据） |
 | **读取方** | platform-web API → `StockLatestDTO` |
-| **TTL** | 300 秒（5 分钟，行情数据自动淘汰） |
+| **TTL** | 0（不过期，持续覆盖；收盘后由运维脚本批量清理） |
 
 **实现说明：**
 
