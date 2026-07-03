@@ -323,17 +323,11 @@ public final class MarketDataWriter {
 
     /**
      * 将行情数据的 tradeDate + tradeTime 拼成 datetime 字符串
-     * tradeDate 格式: 20260629, tradeTime 格式: 150004 → "2026-06-29 15:00:04"
+     * data_gen 已经输出标准格式: tradeDate=yyyy-MM-dd, tradeTime=HH:mm:ss
      */
     private static String formatStatTime(String tradeDate, String tradeTime) {
-        if (tradeDate == null || tradeDate.length() < 8) return "";
-        if (tradeTime == null || tradeTime.length() < 6) return "";
-        return tradeDate.substring(0, 4) + "-"
-             + tradeDate.substring(4, 6) + "-"
-             + tradeDate.substring(6, 8) + " "
-             + tradeTime.substring(0, 2) + ":"
-             + tradeTime.substring(2, 4) + ":"
-             + tradeTime.substring(4, 6);
+        if (tradeDate == null || tradeTime == null) return "";
+        return tradeDate + " " + tradeTime;
     }
 
     /** 转为 BigDecimal 保留 2 位小数 */
