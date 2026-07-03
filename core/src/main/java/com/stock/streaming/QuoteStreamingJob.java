@@ -25,7 +25,7 @@ import java.util.*;
  *
  * 数据流:
  *   Kafka(stock_quote_raw) → 解析JSON → 过滤脏数据 → 计算涨跌幅
- *   → dim_stock / ads_market_summary / Redis实时指标 / HDFS ODS+DWD 落盘
+ *   → dim_stock / MarketDataWriter(Redis+MySQL) / HDFS ODS+DWD 落盘
  */
 public class QuoteStreamingJob {
 
@@ -127,11 +127,8 @@ public class QuoteStreamingJob {
                 // dim_stock —— 新股票代码
                 DimWriter.updateDimStock(spark, quoteDF);
 
-                // ads_market_summary —— 市场概览（MySQL）
-                MarketSummaryWriter.write(spark, quoteDF);
-
-                // Redis —— 实时行情缓存 + 市场概览（Lua 原子写入）
-                RedisWriter.updateMarketData(parsedRDD);
+                // 市场数据 —— Redis 实时缓存 + MySQL 归档
+                MarketDataWriter.write(parsedRDD);
 
                 // HDFS DWD 落盘 —— 离线团队的入口
                 quoteDF.write()
