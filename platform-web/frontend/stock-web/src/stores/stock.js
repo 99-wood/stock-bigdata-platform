@@ -45,6 +45,10 @@ export const useStockStore = defineStore('stock', {
     downRatio: (state) => {
       if (state.marketSummary.totalStocks === 0) return 0
       return (state.marketSummary.downCount / state.marketSummary.totalStocks * 100).toFixed(1)
+    },
+    flatRatio: (state) => {
+      if (state.marketSummary.totalStocks === 0) return 0
+      return (state.marketSummary.flatCount / state.marketSummary.totalStocks * 100).toFixed(1)
     }
   },
 

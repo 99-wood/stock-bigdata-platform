@@ -13,11 +13,11 @@
       >
         <span class="rank-num" :class="getRankClass(index)">{{ index + 1 }}</span>
         <div class="stock-info">
-          <span class="stock-code-only">{{ item.code }}</span>
+          <span class="stock-code-only" :class="codeColor(item)">{{ item.code }}</span>
         </div>
         <div class="stock-data">
-          <span class="stock-bid">买 {{ fmt(item.bid) }}</span>
-          <span class="stock-ask">卖 {{ fmt(item.ask) }}</span>
+          <span class="stock-bid">买 {{ sideText(item, 'bid') }}</span>
+          <span class="stock-ask">卖 {{ sideText(item, 'ask') }}</span>
         </div>
       </div>
       <div v-if="data.length === 0" class="empty-state">
@@ -28,7 +28,9 @@
 </template>
 
 <script setup>
-defineProps({
+import { getStockColorClass } from '@/utils/stockColor'
+
+const props = defineProps({
   title: { type: String, required: true },
   data: { type: Array, default: () => [] },
   type: { type: String, default: 'up' }
@@ -43,9 +45,26 @@ function getRankClass(index) {
   return ''
 }
 
-function fmt(v) {
-  if (v == null) return '--'
-  return v.toFixed(2)
+function codeColor(item) {
+  // 对于涨幅榜/跌幅榜中没有 changePct 的数据，用 panel type 做兜底
+  if (item.changePct != null) return getStockColorClass(item)
+  // 兜底：涨幅榜全红，跌幅榜全绿，其它中性
+  if (props.type === 'up')   return 'code-up'
+  if (props.type === 'down') return 'code-down'
+  return 'code-neutral'
+}
+
+function sideText(item, side) {
+  const b = Number(item.bid), a = Number(item.ask)
+  if (side === 'bid') {
+    if (b > 0) return b.toFixed(2)
+    if (a > 0 && b === 0) return '跌停'
+    return '停牌'
+  }
+  // ask side
+  if (a > 0) return a.toFixed(2)
+  if (b > 0 && a === 0) return '涨停'
+  return '停牌'
 }
 </script>
 
@@ -80,6 +99,30 @@ function fmt(v) {
 .panel-body {
   max-height: 480px;
   overflow-y: auto;
+}
+
+/* Thin, muted scrollbar — blends into the dark terminal aesthetic */
+.panel-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel-body::-webkit-scrollbar-thumb {
+  background: #303a5c;
+  border-radius: 2px;
+}
+
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: #404660;
+}
+
+/* Firefox */
+.panel-body {
+  scrollbar-width: thin;
+  scrollbar-color: #303a5c transparent;
 }
 
 .rank-row {
@@ -124,7 +167,6 @@ function fmt(v) {
 
 .stock-code-only {
   font-size: 13px;
-  color: #e0e6ed;
   font-family: 'Courier New', monospace;
 }
 

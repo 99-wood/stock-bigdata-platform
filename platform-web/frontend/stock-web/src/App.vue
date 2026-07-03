@@ -24,4 +24,12 @@ body {
   min-height: 100vh;
   width: 100%;
 }
+
+/* ---- Global stock code color rules (single source) ---- */
+.code-up        { color: #F85149 !important; }   /* 涨 / 涨停 — 红 */
+.code-down      { color: #3FB950 !important; }   /* 跌 / 跌停 — 绿 */
+.code-suspended { color: #D29922 !important; }   /* 停牌 — 琥珀 */
+.code-delisted  { color: #636D7E !important; }   /* 退市 — 暗灰 */
+.code-flat      { color: #8892A0 !important; }   /* 平盘 — 浅灰 */
+.code-neutral   { color: #E3E7EC; }              /* 默认 — 白 */
 </style>

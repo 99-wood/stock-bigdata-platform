@@ -18,5 +18,6 @@ public class RankItemDTO {
     private String tradeDate;
     private String tradeTime;
     private Double score;
+    private Double changePct;
     private String status;
 }

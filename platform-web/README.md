@@ -1,7 +1,16 @@
+<<<<<<< HEAD
 # platform-web — 可视化与后端模块
 
 > 本模块负责 SpringBoot 后端 API 和 Vue 3 前端展示，聚合 Redis 实时数据和 MySQL 历史数据，为数据大屏和管理后台提供数据服务。
 
+=======
+﻿# platform-web — 可视化与后端模块
+
+> 本模块负责 SpringBoot 后端 API 和 Vue 3 前端展示，聚合 Redis 实时数据和 MySQL 历史数据，为数据大屏和管理后台提供数据服务。
+
+> Redis 实时数据契约见 [../docs/REDIS_SCHEMA.md](../docs/REDIS_SCHEMA.md)。
+
+>>>>>>> main
 ---
 
 ## 1. 模块职责
@@ -108,6 +117,7 @@ platform-web/
 
 ### 4.1 Redis（实时数据，Spark Streaming / Spark SQL 写入）
 
+<<<<<<< HEAD
 > **全局约定**
 >
 > - 时间格式：`yyyy-MM-dd HH:mm:ss`（北京时间 UTC+8）
@@ -230,6 +240,27 @@ platform-web/
 - **Score**：热度指数（0-100），Member = 股票代码
 - **写入方**：Spark Streaming（消费 Kafka `stock_user_event_raw`）
 - **读取命令**：`ZREVRANGE stock:hot:5m 0 19 WITHSCORES`
+=======
+> Redis 数据格式的完整定义见 **[docs/REDIS_SCHEMA.md](../../docs/REDIS_SCHEMA.md)**，以下仅列出 key 清单和本模块的消费关系。
+
+**全局约定：**
+- 时间格式：`yyyy-MM-dd HH:mm:ss`（北京时间 UTC+8）
+- 股票代码格式：市场前缀 + 数字，如 `sh600519`
+- Redis 不存 `name`，前端需要名称时用 code 去 MySQL `dim_stock` 查
+
+| Key | 类型 | 读取方 DTO | 说明 |
+|-----|------|----------|------|
+| `stock:quote:{code}` | String (JSON) | `StockLatestDTO` | 个股 Level-2 五档行情，无 TTL |
+| `stock:market:summary` | Hash | `MarketSummaryDTO` | 市场概览 8 字段 |
+| `stock:rank:up` | ZSet | `RankItemDTO` | 涨幅榜，score = `change_pct` |
+| `stock:rank:down` | ZSet | `RankItemDTO` | 跌幅榜，score = `change_pct` |
+| `stock:rank:amount` | ZSet | `RankItemDTO` | 成交额榜，score = `amount` |
+| `stock:rank:quant` | ZSet | `RankItemDTO` | 量化评分榜，score = `quant_score` |
+| `stock:alert:latest` | List | `AlertDTO` | 最新预警，LPUSH + LTRIM |
+| `stock:hot:5m` | ZSet | （P2 暂不开发） | 用户关注热度，score = 热度指数 |
+
+> `code` 不在 `stock:quote:{code}` 的 JSON 内，从 Redis key 提取。
+>>>>>>> main
 
 ---
 
@@ -262,7 +293,11 @@ platform-web/
 | `/api/stocks/top-up` | GET | Redis `stock:rank:up` + MGET 补全 | 涨幅榜 Top 20 |
 | `/api/stocks/top-down` | GET | Redis `stock:rank:down` + MGET 补全 | 跌幅榜 Top 20 |
 | `/api/stocks/top-amount` | GET | Redis `stock:rank:amount` + MGET 补全 | 成交额榜 Top 20 |
+<<<<<<< HEAD
 | `/api/stocks/{code}` | GET | Redis `stock:quote:{code}` | 个股实时行情 12 字段 + code 从 Key 解析 |
+=======
+| `/api/stocks/{code}` | GET | Redis `stock:quote:{code}` | 个股实时行情（Level-2 五档），code 从 Key 解析 |
+>>>>>>> main
 | `/api/alerts/latest` | GET | Redis `stock:alert:latest` | 最近 50 条预警 |
 
 ### P1 — 历史数据（依赖 C 离线数仓灌入 MySQL stock_ads）
@@ -434,6 +469,7 @@ platform:
 > 本地开发可用 Docker Compose 启动 Redis + MySQL，见项目根目录 `docker-compose.yml`。
 
 ---
+<<<<<<< HEAD
 
 ## 12. 参考文档
 
@@ -449,3 +485,5 @@ platform:
 | MySQL DDL | `../cluster/sql/sqlinit.txt` |
 | 量化权重配置 | `../cluster/config/quant-weight.properties` |
 | 采集器文档 | `../data_gen/README.md` |
+=======
+>>>>>>> main

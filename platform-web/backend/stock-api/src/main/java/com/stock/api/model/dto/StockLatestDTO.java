@@ -12,6 +12,10 @@ public class StockLatestDTO {
     // 从 Redis Key 中提取的股票代码
     private String code;
 
+    // 从 MySQL dim_stock 补全的股票名称
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String name;
+
     // ---- 基础行情 ----
     private Double bid;                         // 买一价
     private Double ask;                         // 卖一价
@@ -63,6 +67,10 @@ public class StockLatestDTO {
     private String s5v;
     @JsonProperty("s5_p")
     private String s5p;
+
+    // ---- 涨跌幅 (v2 OHLCV 扩展字段) ----
+    @JsonProperty("change_pct")
+    private Double changePct;                   // 涨跌幅 %
 
     // ---- 状态 ----
     private String status;                      // 00=正常

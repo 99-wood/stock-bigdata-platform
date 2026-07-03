@@ -3,25 +3,32 @@ package com.stock.api.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stock.api.model.dto.*;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
-
-import org.springframework.data.redis.core.Cursor;
-import org.springframework.data.redis.core.ScanOptions;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class RedisService {
 
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
+
+    /* MySQL dim_stock name lookup — null when mysql profile is not active */
+    @Autowired(required = false)
+    private StockNameService stockNameService;
+
+    public RedisService(StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper) {
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.objectMapper = objectMapper;
+    }
 
     private static final String KEY_MARKET_SUMMARY = "stock:market:summary";
     private static final String KEY_RANK_UP = "stock:rank:up";
@@ -86,6 +93,11 @@ public class RedisService {
             }
             StockLatestDTO dto = objectMapper.readValue(json, StockLatestDTO.class);
             dto.setCode(code);  // code 不在 JSON 内，从 Key 提取
+            // 从 MySQL dim_stock 补全名称 (mysql profile 未激活时跳过)
+            if (stockNameService != null) {
+                String name = stockNameService.getName(code);
+                if (name != null) dto.setName(name);
+            }
             return dto;
         } catch (JsonProcessingException e) {
             log.error("Failed to deserialize stock latest JSON for code: {}", code, e);
@@ -98,12 +110,13 @@ public class RedisService {
 
     /**
      * Get top N stocks by change_pct ascending (top gainers).
+     * Score IS change_pct.
      */
     public List<RankItemDTO> getTopUp(int topN) {
         try {
             Set<ZSetOperations.TypedTuple<String>> tuples =
                     stringRedisTemplate.opsForZSet().reverseRangeWithScores(KEY_RANK_UP, 0, topN - 1);
-            return buildRankList(tuples);
+            return buildRankList(tuples, true);
         } catch (Exception e) {
             log.error("Failed to get top up rank", e);
             return Collections.emptyList();
@@ -113,12 +126,13 @@ public class RedisService {
     /**
      * Get top N stocks by change_pct descending (top losers, most negative first).
      * Uses ZRANGE (ascending) since negative values are the biggest losers.
+     * Score IS change_pct.
      */
     public List<RankItemDTO> getTopDown(int topN) {
         try {
             Set<ZSetOperations.TypedTuple<String>> tuples =
                     stringRedisTemplate.opsForZSet().rangeWithScores(KEY_RANK_DOWN, 0, topN - 1);
-            return buildRankList(tuples);
+            return buildRankList(tuples, true);
         } catch (Exception e) {
             log.error("Failed to get top down rank", e);
             return Collections.emptyList();
@@ -127,12 +141,13 @@ public class RedisService {
 
     /**
      * Get top N stocks by amount (turnover).
+     * Score is amount, NOT change_pct.
      */
     public List<RankItemDTO> getTopAmount(int topN) {
         try {
             Set<ZSetOperations.TypedTuple<String>> tuples =
                     stringRedisTemplate.opsForZSet().reverseRangeWithScores(KEY_RANK_AMOUNT, 0, topN - 1);
-            return buildRankList(tuples);
+            return buildRankList(tuples, false);
         } catch (Exception e) {
             log.error("Failed to get top amount rank", e);
             return Collections.emptyList();
@@ -141,12 +156,13 @@ public class RedisService {
 
     /**
      * Get top N stocks by quant score.
+     * Score is quant, NOT change_pct.
      */
     public List<RankItemDTO> getTopQuant(int topN) {
         try {
             Set<ZSetOperations.TypedTuple<String>> tuples =
                     stringRedisTemplate.opsForZSet().reverseRangeWithScores(KEY_RANK_QUANT, 0, topN - 1);
-            return buildRankList(tuples);
+            return buildRankList(tuples, false);
         } catch (Exception e) {
             log.error("Failed to get top quant rank", e);
             return Collections.emptyList();
@@ -184,7 +200,7 @@ public class RedisService {
     /**
      * Build a rank list from ZSet tuples: MGET stock JSONs, then zip with scores.
      */
-    private List<RankItemDTO> buildRankList(Set<ZSetOperations.TypedTuple<String>> tuples) {
+    private List<RankItemDTO> buildRankList(Set<ZSetOperations.TypedTuple<String>> tuples, boolean scoreIsChangePct) {
         if (tuples == null || tuples.isEmpty()) {
             return Collections.emptyList();
         }
@@ -230,6 +246,7 @@ public class RedisService {
                         .tradeDate(stock.getTradeDate())
                         .tradeTime(stock.getTradeTime())
                         .score(scores.get(i))
+                        .changePct(stock.getChangePct())
                         .status(stock.getStatus())
                         .build();
                 result.add(item);
@@ -316,6 +333,18 @@ public class RedisService {
                     stocks.isEmpty() ? "N/A" : stocks.get(0).getCode(),
                     stocks.isEmpty() ? "N/A" : stocks.get(0).getTradeDate(),
                     stocks.isEmpty() ? "N/A" : stocks.get(0).getBid());
+
+            // Enrich with stock names from MySQL dim_stock (mysql profile 未激活时跳过)
+            if (stockNameService != null) {
+                for (StockLatestDTO dto : stocks) {
+                    if (dto.getCode() != null) {
+                        String name = stockNameService.getName(dto.getCode());
+                        if (name != null) dto.setName(name);
+                    }
+                }
+                log.info("Name enrichment done, cache entries: {}", stockNameService.getCacheSize());
+            }
+
             return stocks;
 
         } catch (Exception e) {
