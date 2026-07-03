@@ -13,7 +13,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -186,14 +185,14 @@ public final class RedisWriter {
                 jedis = newJedis();
                 String sha = ensureSha(jedis);
 
-                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                String statTime = sdf.format(new Date());
                 int count = 0;
 
                 while (iterator.hasNext()) {
                     StockQuote q = iterator.next();
                     String ohlcvKey = KEY_OHLCV_PREFIX + q.getCode();
                     String json = buildOhlcvJson(q);
+                    // stat_time 使用行情数据自带的时间，而非系统时间
+                    String statTime = formatStatTime(q.getTradeDate(), q.getTradeTime());
 
                     try {
                         jedis.evalsha(sha,
@@ -278,6 +277,21 @@ public final class RedisWriter {
         } catch (Exception e) {
             throw new RuntimeException("JSON 序列化失败: " + q.getCode(), e);
         }
+    }
+
+    /**
+     * 将行情数据的 tradeDate + tradeTime 拼成 datetime 字符串
+     * tradeDate 格式: 20260629, tradeTime 格式: 150004 → "2026-06-29 15:00:04"
+     */
+    private static String formatStatTime(String tradeDate, String tradeTime) {
+        if (tradeDate == null || tradeDate.length() < 8) return "";
+        if (tradeTime == null || tradeTime.length() < 6) return "";
+        return tradeDate.substring(0, 4) + "-"
+             + tradeDate.substring(4, 6) + "-"
+             + tradeDate.substring(6, 8) + " "
+             + tradeTime.substring(0, 2) + ":"
+             + tradeTime.substring(2, 4) + ":"
+             + tradeTime.substring(4, 6);
     }
 
     /** 转为 BigDecimal 保留 2 位小数，避免科学计数法和浮点误差 */
