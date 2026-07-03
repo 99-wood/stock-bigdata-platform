@@ -32,6 +32,15 @@ public class QuoteStreamingJob {
     private static final Logger LOG = LoggerFactory.getLogger(QuoteStreamingJob.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /** 优雅停止标记文件: 存在则 Streaming 在下个 batch 开始时主动退出 */
+    private static final String SHUTDOWN_MARKER = "/tmp/stock-consumer-stop";
+
+    /** StreamingContext 的 static 持有, 避免 lambda 捕获非序列化的 ssc 局部变量 */
+    private static volatile JavaStreamingContext streamingContext;
+
+    /** 优雅停止标记: 后台线程检测到此标记后从外部调用 ssc.stop() */
+    private static volatile boolean shutdownRequested = false;
+
     public static void main(String[] args) throws InterruptedException {
 
         // ---- 1. SparkConf ----
@@ -47,6 +56,10 @@ public class QuoteStreamingJob {
                 () -> createContext(conf, checkpointPath)
         );
         ssc.sparkContext().setLogLevel("INFO");
+
+        // fix: 无论新建还是 checkpoint 恢复，都需要设置 streamingContext 并启动 monitor
+        streamingContext = ssc;
+        startShutdownMonitor();
 
         // ---- 3. 启动 ----
         ssc.start();
@@ -85,6 +98,13 @@ public class QuoteStreamingJob {
 
         // ---- 核心处理 ----
         stream.foreachRDD(rdd -> {
+            // 优雅停止: 检查 shutdown marker, 置标记位让后台线程调用 stop
+            if (isShutdownRequested()) {
+                LOG.info("检测到 shutdown marker, 置停止标记");
+                shutdownRequested = true;
+                return;
+            }
+
             if (rdd.isEmpty()) {
                 return;
             }
@@ -177,6 +197,26 @@ public class QuoteStreamingJob {
         public void setTradeDate(String tradeDate) { this.tradeDate = tradeDate; }
         public String getRawJson() { return rawJson; }
         public void setRawJson(String rawJson) { this.rawJson = rawJson; }
+    }
+
+    /** 启动 shutdown-monitor 后台线程，从外部调用 ssc.stop 避免 foreachRDD 内死锁 */
+    private static void startShutdownMonitor() {
+        Thread monitor = new Thread(() -> {
+            while (!shutdownRequested) {
+                try { Thread.sleep(2000); } catch (InterruptedException e) { break; }
+            }
+            if (streamingContext != null) {
+                LOG.info("shutdown monitor 检测到停止标记, 正在优雅停止 StreamingContext...");
+                streamingContext.stop(true, true);
+            }
+        }, "shutdown-monitor");
+        monitor.setDaemon(true);
+        monitor.start();
+    }
+
+    /** 检查 shutdown marker 文件是否存在（优雅停止） */
+    private static boolean isShutdownRequested() {
+        return new java.io.File(SHUTDOWN_MARKER).exists();
     }
 
     private static StockQuote parseAndCalc(String json) {
