@@ -149,10 +149,11 @@ public final class RedisWriter {
         // ---- 1. 检查是否跨天 batch ----
         long distinctDates = parsedRDD.map(StockQuote::getTradeDate).distinct().count();
         if (distinctDates > 1) {
-            // 跨天 batch: 清空汇总，跳过本批次，打 WARN
+            // 跨天 batch: 清空汇总 + OHLCV，跳过本批次
             try (Jedis jedis = newJedis()) {
                 jedis.del(KEY_MARKET_SUMMARY);
-                LOG.warn("本批次跨天 ({} 个日期)，已清空 market:summary，跳过本 batch", distinctDates);
+                clearOhlcvKeys(jedis);
+                LOG.warn("本批次跨天, 已清空 market:summary + OHLCV，跳过本 batch");
             } catch (Exception e) {
                 LOG.error("跨天清空 Redis 失败", e);
             }
@@ -164,9 +165,12 @@ public final class RedisWriter {
         try (Jedis jedis = newJedis()) {
             String storedDate = jedis.hget(KEY_MARKET_SUMMARY, "stat_date");
             if (!today.equals(storedDate)) {
+                // 清空汇总 Hash
                 jedis.del(KEY_MARKET_SUMMARY);
+                // 清空昨天残留的 OHLCV key，避免 delta = 今天值 - 昨天值 导致负增量
+                clearOhlcvKeys(jedis);
                 jedis.hset(KEY_MARKET_SUMMARY, "stat_date", today);
-                LOG.info("日清: stat_date {} → {}, 市场汇总已重置", storedDate, today);
+                LOG.info("日清: stat_date {} → {}, 市场汇总 + OHLCV 已重置", storedDate, today);
             }
         } catch (Exception e) {
             LOG.error("日清检查失败", e);
@@ -182,8 +186,8 @@ public final class RedisWriter {
                 jedis = newJedis();
                 String sha = ensureSha(jedis);
 
-                String statTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-                        .format(new Date());
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                String statTime = sdf.format(new Date());
                 int count = 0;
 
                 while (iterator.hasNext()) {
@@ -223,6 +227,17 @@ public final class RedisWriter {
     // ============================================================
 
     /**
+     * 日清时删除所有 OHLCV key，避免跨天 delta 计算错误
+     */
+    static void clearOhlcvKeys(Jedis jedis) {
+        Set<String> keys = jedis.keys(KEY_OHLCV_PREFIX + "*");
+        if (keys != null && !keys.isEmpty()) {
+            jedis.del(keys.toArray(new String[0]));
+            LOG.info("日清: 删除 {} 个 OHLCV key", keys.size());
+        }
+    }
+
+    /**
      * 创建 Jedis 连接
      */
     static Jedis newJedis() {
@@ -247,14 +262,15 @@ public final class RedisWriter {
      */
     static String buildOhlcvJson(StockQuote q) {
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("price",      round2(q.getPrice()));
-        map.put("open",       round2(q.getOpen()));
-        map.put("high",       round2(q.getHigh()));
-        map.put("low",        round2(q.getLow()));
+        map.put("name",       q.getName());                                      // 股票名称
+        map.put("price",      bd2(q.getPrice()));
+        map.put("open",       bd2(q.getOpen()));
+        map.put("high",       bd2(q.getHigh()));
+        map.put("low",        bd2(q.getLow()));
         map.put("volume",     (long) q.getVolume());                            // 成交量: 整数
-        map.put("amount",     BigDecimal.valueOf(q.getAmount()).setScale(2, BigDecimal.ROUND_HALF_UP));
-        map.put("change",     round2(q.getChangeAmt()));
-        map.put("change_pct", round2(q.getChangePct()));
+        map.put("amount",     bd2(q.getAmount()));
+        map.put("change",     bd2(q.getChangeAmt()));
+        map.put("change_pct", bd2(q.getChangePct()));
         map.put("trade_date", q.getTradeDate());
         map.put("trade_time", q.getTradeTime());
         try {
@@ -264,8 +280,8 @@ public final class RedisWriter {
         }
     }
 
-    /** 保留 2 位小数，避免 0.03999999999 这种浮点误差 */
-    private static double round2(double v) {
-        return Math.round(v * 100.0) / 100.0;
+    /** 转为 BigDecimal 保留 2 位小数，避免科学计数法和浮点误差 */
+    private static java.math.BigDecimal bd2(double v) {
+        return java.math.BigDecimal.valueOf(v).setScale(2, java.math.BigDecimal.ROUND_HALF_UP);
     }
 }
