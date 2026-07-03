@@ -39,17 +39,18 @@ STOCK_LIMIT = int(os.environ.get("STOCK_LIMIT", "200"))
 # 每轮采集数量：滚动窗口大小（sina 模式下每轮采集多少支）
 ROLLING_SIZE = int(os.environ.get("ROLLING_SIZE", "200"))
 
-# A 股代码列表：优先从 valid_codes.txt 加载，回退到代码段生成
+# A 股代码列表：必须从 valid_codes.txt 加载，缺失则直接报错退出
 VALID_CODES_FILE = os.environ.get("VALID_CODES_FILE", "valid_codes.txt")
-if os.path.exists(VALID_CODES_FILE):
+if not os.path.exists(VALID_CODES_FILE):
+    raise FileNotFoundError(
+        f"valid_codes.txt 不存在，请先运行代码提取脚本生成该文件。"
+        f"预期路径: {os.path.abspath(VALID_CODES_FILE)}"
+    )
+try:
     with open(VALID_CODES_FILE, "r", encoding="utf-8") as f:
         STOCK_CODES = [line.strip() for line in f if line.strip()]
-else:
-    STOCK_CODES = []
-    STOCK_CODES += [f"sh{i}" for i in range(600000, 606000)]   # 沪主板
-    STOCK_CODES += [f"sh{i}" for i in range(688000, 690000)]   # 科创板
-    STOCK_CODES += [f"sz{i:06d}" for i in range(1, 4000)]      # 深主板
-    STOCK_CODES += [f"sz{i}" for i in range(300000, 302000)]   # 创业板
+except Exception as e:
+    raise RuntimeError(f"读取 {VALID_CODES_FILE} 失败: {e}")
 
 if STOCK_LIMIT > 0:
     STOCK_CODES = STOCK_CODES[:STOCK_LIMIT]

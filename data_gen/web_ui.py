@@ -329,7 +329,9 @@ def list_files():
 
 @app.route("/files/<name>", methods=["DELETE"])
 def delete_file(name):
-    p = JSONL_DIR / name
+    p = (JSONL_DIR / name).resolve()
+    if not str(p).startswith(str(JSONL_DIR.resolve()) + os.sep):
+        return jsonify(ok=False, msg="非法文件名"), 403
     if p.exists():
         p.unlink()
         return jsonify(ok=True, msg=f"已删除 {name}")
