@@ -15,7 +15,8 @@ echo "  Spark Streaming 消费端启动"
 echo "=========================================="
 
 # ---- 1. 检查是否已运行 ----
-RUNNING=$(source /etc/profile && spark-submit --status 2>/dev/null | grep "$APP_NAME" || true)
+# fix: spark-submit 没有 --status 子命令, 改用 ps 检测
+RUNNING=$(ps aux | grep "SparkSubmit.*$APP_NAME" | grep -v grep)
 if [ -n "$RUNNING" ]; then
     echo "[跳过] $APP_NAME 可能已在运行中"
     echo "$RUNNING"

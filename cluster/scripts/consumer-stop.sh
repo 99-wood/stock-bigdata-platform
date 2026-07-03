@@ -59,12 +59,12 @@ if kill -0 $PID 2>/dev/null; then
     echo "  ✓ 已强制停止"
 fi
 
-# ---- 3. 清理标记 ----
+# ---- 5. 清理标记 ----
 rm -f /tmp/stock-consumer-stop
 
 echo ""
 
-# ---- 5. 检查残留 Spark Executor ----
+# ---- 6. 检查残留 Spark Executor ----
 # 清理可能未退出的 CoarseGrainedExecutorBackend
 for host in 192.168.137.202 192.168.137.203 192.168.137.204; do
     REMOTE_PIDS=$(ssh -o ConnectTimeout=3 $host "ps aux | grep 'CoarseGrainedExecutorBackend' | grep -v grep | awk '{print \$2}'" 2>/dev/null)
@@ -76,7 +76,7 @@ done
 
 wait
 
-# ---- 6. 最终确认 ----
+# ---- 7. 最终确认 ----
 REMAIN=$(ps aux | grep "SparkSubmit.*$APP_NAME" | grep -v grep)
 if [ -n "$REMAIN" ]; then
     echo "[警告] 仍有残留进程: $REMAIN"

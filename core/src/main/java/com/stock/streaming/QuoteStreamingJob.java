@@ -57,6 +57,10 @@ public class QuoteStreamingJob {
         );
         ssc.sparkContext().setLogLevel("INFO");
 
+        // fix: 无论新建还是 checkpoint 恢复，都需要设置 streamingContext 并启动 monitor
+        streamingContext = ssc;
+        startShutdownMonitor();
+
         // ---- 3. 启动 ----
         ssc.start();
         LOG.info("QuoteStreamingJob 已启动, 等待数据...");
@@ -70,18 +74,6 @@ public class QuoteStreamingJob {
                 Durations.seconds(Config.batchDurationSeconds())
         );
         ssc.checkpoint(checkpointPath);
-        streamingContext = ssc;
-
-        // 后台线程: 每隔 2s 检查 shutdown 标记, 从外部调用 ssc.stop 避免 foreachRDD 内死锁
-        Thread shutdownMonitor = new Thread(() -> {
-            while (!shutdownRequested) {
-                try { Thread.sleep(2000); } catch (InterruptedException e) { break; }
-            }
-            LOG.info("shutdown monitor 检测到停止标记, 正在优雅停止 StreamingContext...");
-            streamingContext.stop(true, true);
-        }, "shutdown-monitor");
-        shutdownMonitor.setDaemon(true);
-        shutdownMonitor.start();
 
         SparkSession spark = SparkSession.builder()
                 .sparkContext(ssc.sparkContext().sc())
@@ -205,6 +197,21 @@ public class QuoteStreamingJob {
         public void setTradeDate(String tradeDate) { this.tradeDate = tradeDate; }
         public String getRawJson() { return rawJson; }
         public void setRawJson(String rawJson) { this.rawJson = rawJson; }
+    }
+
+    /** 启动 shutdown-monitor 后台线程，从外部调用 ssc.stop 避免 foreachRDD 内死锁 */
+    private static void startShutdownMonitor() {
+        Thread monitor = new Thread(() -> {
+            while (!shutdownRequested) {
+                try { Thread.sleep(2000); } catch (InterruptedException e) { break; }
+            }
+            if (streamingContext != null) {
+                LOG.info("shutdown monitor 检测到停止标记, 正在优雅停止 StreamingContext...");
+                streamingContext.stop(true, true);
+            }
+        }, "shutdown-monitor");
+        monitor.setDaemon(true);
+        monitor.start();
     }
 
     /** 检查 shutdown marker 文件是否存在（优雅停止） */
