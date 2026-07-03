@@ -97,6 +97,8 @@ public final class MarketDataWriter {
 
     static {
         try {
+            // 集群使用 mysql-connector-java-5.1.47.jar, 驱动类为 com.mysql.jdbc.Driver
+            // 若升级到 8.x 需改为 com.mysql.cj.jdbc.Driver
             Class.forName("com.mysql.jdbc.Driver");
         } catch (ClassNotFoundException e) {
             LOG.error("MySQL JDBC 驱动加载失败", e);
@@ -152,11 +154,10 @@ public final class MarketDataWriter {
             if (!iterator.hasNext()) return;
 
             Jedis jedis = null;
+            int count = 0;
             try {
                 jedis = newJedis();
                 String sha = ensureSha(jedis);
-
-                int count = 0;
 
                 if (usePipeline) {
                     // Pipeline 模式: 攒整个分区为一批，一次 sync 发送全部
@@ -198,8 +199,9 @@ public final class MarketDataWriter {
                 }
                 LOG.info("分区写入完成, {} 条, mode={}", count, usePipeline ? "pipeline" : "plain");
             } catch (JedisNoScriptException e) {
-                // Pipeline 模式下 NOSCRIPT 罕见，跳过本分区，下一 batch 自动重试
-                LOG.warn("Pipeline NOSCRIPT, 跳过本分区, 下一 batch 重试");
+                // fix #1: NOSCRIPT 时必须置 null, 否则后续 ensureSha 返回过期 SHA, 级联全部失败
+                luaSha = null;
+                LOG.error("Pipeline NOSCRIPT, SHA 已重置, 本分区 {} 条需下 batch 重试", count, e);
             } catch (Exception e) {
                 LOG.error("Redis 分区写入失败", e);
             } finally {
@@ -267,23 +269,43 @@ public final class MarketDataWriter {
                 return;
             }
 
-            String sql = "INSERT INTO ads_market_summary " +
+            // fix #5: 午休/收盘后 stat_time 不变, INSERT 会违反唯一约束 → REPLACE INTO
+            // fix #3: 保持原始单位 股/元, DDL COMMENT 已同步更新
+            String sql = "REPLACE INTO ads_market_summary " +
                     "(stat_time, total_stocks, up_count, down_count, flat_count, " +
                     " avg_change_pct, total_volume, total_amount) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+
+            // fix #2: 字段缺失时跳过, 避免 NPE 导致静默失败
+            String statTime = map.get("stat_time");
+            String totalStocks = map.get("total_stocks");
+            String upCount = map.get("up_count");
+            String downCount = map.get("down_count");
+            String flatCount = map.get("flat_count");
+            String avgChangePct = map.get("avg_change_pct");
+            String totalVolume = map.get("total_volume");
+            String totalAmount = map.get("total_amount");
+            if (statTime == null || totalStocks == null || upCount == null
+                    || downCount == null || flatCount == null
+                    || avgChangePct == null || totalVolume == null || totalAmount == null) {
+                LOG.warn("MySQL 归档跳过: Redis Hash 字段缺失");
+                return;
+            }
 
             try (Connection conn = DriverManager.getConnection(
                     Config.mysqlUrl(), Config.mysqlUser(), Config.mysqlPassword());
                  PreparedStatement ps = conn.prepareStatement(sql)) {
 
-                ps.setString(1, map.get("stat_time"));
-                ps.setLong(2, Long.parseLong(map.get("total_stocks")));
-                ps.setLong(3, Long.parseLong(map.get("up_count")));
-                ps.setLong(4, Long.parseLong(map.get("down_count")));
-                ps.setLong(5, Long.parseLong(map.get("flat_count")));
-                ps.setDouble(6, Double.parseDouble(map.get("avg_change_pct")));
-                ps.setDouble(7, Double.parseDouble(map.get("total_volume")));
-                ps.setDouble(8, Double.parseDouble(map.get("total_amount")));
+                ps.setString(1, statTime);
+                ps.setLong(2, Long.parseLong(totalStocks));
+                ps.setLong(3, Long.parseLong(upCount));
+                ps.setLong(4, Long.parseLong(downCount));
+                ps.setLong(5, Long.parseLong(flatCount));
+                ps.setDouble(6, Double.parseDouble(avgChangePct));
+                // fix #8: total_volume 是 BIGINT, 用 parseLong + setLong
+                ps.setLong(7, Long.parseLong(totalVolume));
+                // fix #3: total_amount 存原始 元, 精度高于 万元
+                ps.setDouble(8, Double.parseDouble(totalAmount));
                 ps.executeUpdate();
 
                 LOG.info("MySQL 归档: total_stocks={}, up={}, down={}, flat={}, avg_change_pct={}",
@@ -344,9 +366,12 @@ public final class MarketDataWriter {
     /**
      * 将行情数据的 tradeDate + tradeTime 拼成 datetime 字符串
      * data_gen 已经输出标准格式: tradeDate=yyyy-MM-dd, tradeTime=HH:mm:ss
+     * fix #4: null 时用系统时间兜底, 避免 "" 写入 MySQL stat_time NOT NULL 导致归档失败
      */
     private static String formatStatTime(String tradeDate, String tradeTime) {
-        if (tradeDate == null || tradeTime == null) return "";
+        if (tradeDate == null || tradeTime == null) {
+            return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date());
+        }
         return tradeDate + " " + tradeTime;
     }
 
