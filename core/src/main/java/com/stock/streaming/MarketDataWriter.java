@@ -140,7 +140,8 @@ public final class MarketDataWriter {
             if (!today.equals(storedDate)) {
                 jedis.del(KEY_MARKET_SUMMARY);
                 clearOhlcvKeys(jedis);
-                jedis.hset(KEY_MARKET_SUMMARY, "stat_date", today);
+                // fix: 预置所有数值字段为 0, 避免某类股票不存在时字段缺失导致 archiveToMysql 跳过
+                jedis.hmset(KEY_MARKET_SUMMARY, resetSummaryFields(today));
                 LOG.info("日清: stat_date {} → {}, 市场汇总 + OHLCV 已重置", storedDate, today);
             }
         } catch (Exception e) {
@@ -320,6 +321,22 @@ public final class MarketDataWriter {
     // ============================================================
     // 工具方法
     // ============================================================
+
+    /** 日清时预置 summary Hash 全部字段为 0, stat_date 为当日 */
+    private static Map<String, String> resetSummaryFields(String statDate) {
+        Map<String, String> map = new HashMap<>();
+        map.put("stat_date",     statDate);
+        map.put("stat_time",     "");
+        map.put("total_stocks",  "0");
+        map.put("up_count",      "0");
+        map.put("down_count",    "0");
+        map.put("flat_count",    "0");
+        map.put("_sum_pct",      "0");
+        map.put("total_volume",  "0");
+        map.put("total_amount",  "0");
+        map.put("avg_change_pct","0");
+        return map;
+    }
 
     /** 日清时删除所有 OHLCV key */
     static void clearOhlcvKeys(Jedis jedis) {
