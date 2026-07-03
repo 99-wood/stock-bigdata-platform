@@ -62,8 +62,15 @@ public final class DimWriter {
                 "FROM tmp_new_codes"
         );
 
-        // 2. 获取已存在的 code 集合（fix #11: 广播缓存，5 分钟刷新一次）
-        Set<String> existingSet = getExistingCodes(spark, props);
+        // 2. 获取已存在的 code 集合（广播缓存，5 分钟刷新，JDBC 不可用时返回空集合）
+        Set<String> existingSet;
+        try {
+            existingSet = getExistingCodes(spark, props);
+        } catch (Exception e) {
+            // JDBC 不可用时跳过维表更新（Redis 写入不受影响）
+            LOG.warn("读取 dim_stock 失败, 跳过维表更新: {}", e.getMessage());
+            return;
+        }
 
         // 3. 内存去重：排除已存在的 code
         List<Row> newRows = newDimDF.collectAsList().stream()
