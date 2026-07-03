@@ -77,4 +77,7 @@ public final class Config {
     // ==================== Streaming ====================
     public static int batchDurationSeconds() { return getInt("streaming.batch.duration.seconds"); }
     public static int minuteWindowSeconds() { return getInt("streaming.minute.window.seconds"); }
+
+    // ==================== Redis Pipeline ====================
+    public static boolean redisPipelineEnabled() { return Boolean.parseBoolean(get("redis.pipeline.enabled")); }
 }

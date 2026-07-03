@@ -147,6 +147,7 @@ public final class MarketDataWriter {
         }
 
         // ---- 3. 并行写入 Redis（foreachPartition → Lua EVALSHA） ----
+        final boolean usePipeline = Config.redisPipelineEnabled();
         parsedRDD.foreachPartition(iterator -> {
             if (!iterator.hasNext()) return;
 
@@ -157,29 +158,48 @@ public final class MarketDataWriter {
 
                 int count = 0;
 
-                while (iterator.hasNext()) {
-                    StockQuote q = iterator.next();
-                    String ohlcvKey = KEY_OHLCV_PREFIX + q.getCode();
-                    String json = buildOhlcvJson(q);
-                    // stat_time 使用行情数据自带的时间，而非系统时间
-                    String statTime = formatStatTime(q.getTradeDate(), q.getTradeTime());
-
-                    try {
-                        jedis.evalsha(sha,
-                                Arrays.asList(ohlcvKey, KEY_MARKET_SUMMARY),
-                                Arrays.asList(json, statTime));
-                        count++;
-                    } catch (JedisNoScriptException e) {
-                        LOG.warn("NOSCRIPT, 重新 LOAD Lua 脚本");
-                        luaSha = null;
-                        sha = ensureSha(jedis);
-                        jedis.evalsha(sha,
+                if (usePipeline) {
+                    // Pipeline 模式: 攒整个分区为一批，一次 sync 发送全部
+                    redis.clients.jedis.Pipeline pipeline = jedis.pipelined();
+                    while (iterator.hasNext()) {
+                        StockQuote q = iterator.next();
+                        String ohlcvKey = KEY_OHLCV_PREFIX + q.getCode();
+                        String json = buildOhlcvJson(q);
+                        String statTime = formatStatTime(q.getTradeDate(), q.getTradeTime());
+                        pipeline.evalsha(sha,
                                 Arrays.asList(ohlcvKey, KEY_MARKET_SUMMARY),
                                 Arrays.asList(json, statTime));
                         count++;
                     }
+                    pipeline.sync();
+                } else {
+                    // 逐条模式: 每条一次网络往返，支持单条 NOSCRIPT 回退
+                    while (iterator.hasNext()) {
+                        StockQuote q = iterator.next();
+                        String ohlcvKey = KEY_OHLCV_PREFIX + q.getCode();
+                        String json = buildOhlcvJson(q);
+                        String statTime = formatStatTime(q.getTradeDate(), q.getTradeTime());
+
+                        try {
+                            jedis.evalsha(sha,
+                                    Arrays.asList(ohlcvKey, KEY_MARKET_SUMMARY),
+                                    Arrays.asList(json, statTime));
+                            count++;
+                        } catch (JedisNoScriptException e) {
+                            LOG.warn("NOSCRIPT, 重新 LOAD Lua 脚本");
+                            luaSha = null;
+                            sha = ensureSha(jedis);
+                            jedis.evalsha(sha,
+                                    Arrays.asList(ohlcvKey, KEY_MARKET_SUMMARY),
+                                    Arrays.asList(json, statTime));
+                            count++;
+                        }
+                    }
                 }
-                LOG.info("分区写入完成, {} 条", count);
+                LOG.info("分区写入完成, {} 条, mode={}", count, usePipeline ? "pipeline" : "plain");
+            } catch (JedisNoScriptException e) {
+                // Pipeline 模式下 NOSCRIPT 罕见，跳过本分区，下一 batch 自动重试
+                LOG.warn("Pipeline NOSCRIPT, 跳过本分区, 下一 batch 重试");
             } catch (Exception e) {
                 LOG.error("Redis 分区写入失败", e);
             } finally {
