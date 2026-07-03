@@ -25,7 +25,7 @@ import java.util.*;
  *
  * 数据流:
  *   Kafka(stock_quote_raw) → 解析JSON → 过滤脏数据 → 计算涨跌幅
- *   → dim_stock / ads_market_summary / HDFS ODS+DWD 落盘
+ *   → dim_stock / ads_market_summary / Redis实时指标 / HDFS ODS+DWD 落盘
  */
 public class QuoteStreamingJob {
 
@@ -103,8 +103,6 @@ public class QuoteStreamingJob {
             LOG.info("ODS 归档完成");
 
             // 解析 JSON → StockQuote，过滤脏数据，计算涨跌幅
-            // fix #3: 添加 name 非空检查
-            // fix #12: cache() 放在 isEmpty() 之前
             JavaRDD<StockQuote> parsedRDD = rdd.map(ConsumerRecord::value)
                     .map(QuoteStreamingJob::parseAndCalc)
                     .filter(Objects::nonNull)
@@ -129,8 +127,11 @@ public class QuoteStreamingJob {
                 // dim_stock —— 新股票代码
                 DimWriter.updateDimStock(spark, quoteDF);
 
-                // ads_market_summary —— 市场概览
+                // ads_market_summary —— 市场概览（MySQL）
                 MarketSummaryWriter.write(spark, quoteDF);
+
+                // Redis —— 实时行情缓存 + 市场概览（Lua 原子写入）
+                RedisWriter.updateMarketData(parsedRDD);
 
                 // HDFS DWD 落盘 —— 离线团队的入口
                 quoteDF.write()
