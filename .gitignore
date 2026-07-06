@@ -73,6 +73,10 @@ dist/
 # Local overrides
 *.local.*
 
+# Platform dev scripts (local use only)
+platform-web/**/run-dev.bat
+platform-web/**/clean.bat
+
 # Project-specific (not for commit)
 GIT_COLLABORATION_GUIDE.md
 README2.md

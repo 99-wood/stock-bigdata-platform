@@ -1,0 +1,40 @@
+# Dev profile template
+# Copy to src/main/resources/application-dev.yml and fill in your values.
+#
+# Usage:
+#   mvn spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=dev"
+#   (add ",mysql" to also enable MySQL datasource: --spring.profiles.active=dev,mysql)
+
+spring:
+  data:
+    redis:
+      host: <your-redis-host>
+      port: 6379
+      password: "<your-redis-password>"
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+
+---
+# mysql profile (optional)
+# Activate with --spring.profiles.active=dev,mysql
+spring:
+  config:
+    activate:
+      on-profile: mysql
+  autoconfigure:
+    exclude:
+  datasource:
+    url: jdbc:mysql://<your-mysql-host>:3306/stock_ads?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: <your-mysql-username>
+    password: <your-mysql-password>
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      idle-timeout: 30000
+      initialization-fail-timeout: 3000

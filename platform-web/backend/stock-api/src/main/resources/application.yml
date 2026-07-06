@@ -7,18 +7,6 @@ spring:
   autoconfigure:
     exclude:
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
-  data:
-    redis:
-      host: 192.168.137.210
-      port: 6379
-      password: "1"
-      timeout: 5000ms
-      lettuce:
-        pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
-          max-wait: -1ms
 
 platform:
   push:
@@ -27,22 +15,3 @@ platform:
 logging:
   level:
     com.stock.api: INFO
-
----
-# mysql profile: enable datasource → StockNameService loads dim_stock names
-spring:
-  config:
-    activate:
-      on-profile: mysql
-  autoconfigure:
-    exclude:
-  datasource:
-    url: jdbc:mysql://192.168.137.210:3306/stock_ads?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
-    username: stock_admin
-    password: stock2026
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    hikari:
-      maximum-pool-size: 5
-      minimum-idle: 1
-      idle-timeout: 30000
-      initialization-fail-timeout: 3000
