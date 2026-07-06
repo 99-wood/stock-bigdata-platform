@@ -16,6 +16,16 @@ if [ "$1" = "--replay" ]; then
     echo "=========================================="
     echo "  Spark Streaming 消费端启动 (REPLAY 模式)"
     echo "=========================================="
+
+    # 重置 Kafka offset 到 earliest（否则 auto.offset.reset 不生效）
+    echo "  重置 Kafka offset → 0..."
+    ssh mid "export JAVA_HOME=/root/jdk1.8.0_171 && /root/kafka/bin/kafka-consumer-groups.sh \
+        --bootstrap-server mid:9092 \
+        --group stock_streaming_consumer_v2 \
+        --reset-offsets --to-earliest \
+        --topic stock_quote_raw \
+        --execute 2>/dev/null"
+    echo "  完成"
 else
     echo "=========================================="
     echo "  Spark Streaming 消费端启动"
@@ -35,7 +45,12 @@ if [ ! -f "$JAR_FILE" ]; then
     exit 1
 fi
 
-# ---- 3. 启动 ----
+# ---- 3. 备份旧日志 ----
+if [ -f /tmp/consumer.log ]; then
+    cp /tmp/consumer.log /tmp/consumer.log.$(date +%Y%m%d_%H%M%S)
+fi
+
+# ---- 4. 启动 ----
 rm -f /tmp/stock-consumer-stop
 source /etc/profile
 nohup spark-submit \
@@ -50,7 +65,7 @@ nohup spark-submit \
     --conf spark.streaming.kafka.maxRatePerPartition=10000 \
     "$JAR_FILE" \
     $REPLAY \
-    > /tmp/consumer.log 2>&1 &
+    >> /tmp/consumer.log 2>&1 &
 
 echo "  PID: $!"
 echo "  日志: /tmp/consumer.log"
