@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS ads_market_summary (
     down_count      INT           NOT NULL DEFAULT 0 COMMENT '下跌家数（change_pct < 0）',
     flat_count      INT           NOT NULL DEFAULT 0 COMMENT '平盘家数（change_pct = 0）',
     avg_change_pct  DECIMAL(10,4) NOT NULL DEFAULT 0 COMMENT '平均涨跌幅 %',
-    total_volume    BIGINT                         COMMENT '全市场总成交量（手）',
-    total_amount    DECIMAL(24,4)                  COMMENT '全市场总成交额（万元）',
+    total_volume    BIGINT                         COMMENT '全市场总成交量（股）',
+    total_amount    DECIMAL(24,4)                  COMMENT '全市场总成交额（元）',
     UNIQUE KEY uk_stat_time (stat_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='市场概览——实时 Redis 为主，MySQL 兜底';
 

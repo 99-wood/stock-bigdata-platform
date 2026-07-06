@@ -26,6 +26,8 @@ mysql.password=请填写密码
 redis.host=192.168.137.210
 redis.port=6379
 redis.password=请填写密码
+# Redis Pipeline 批量写入开关: true=分区内一次 sync 发送, false=逐条 EVALSHA（可单条 NOSCRIPT 回退）
+redis.pipeline.enabled=true
 
 # ------- Streaming -------
 streaming.batch.duration.seconds=10

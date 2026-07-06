@@ -25,12 +25,21 @@ import java.util.*;
  *
  * 数据流:
  *   Kafka(stock_quote_raw) → 解析JSON → 过滤脏数据 → 计算涨跌幅
- *   → dim_stock / ads_market_summary / HDFS ODS+DWD 落盘
+ *   → dim_stock / MarketDataWriter(Redis+MySQL) / HDFS ODS+DWD 落盘
  */
 public class QuoteStreamingJob {
 
     private static final Logger LOG = LoggerFactory.getLogger(QuoteStreamingJob.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** 优雅停止标记文件: 存在则 Streaming 在下个 batch 开始时主动退出 */
+    private static final String SHUTDOWN_MARKER = "/tmp/stock-consumer-stop";
+
+    /** StreamingContext 的 static 持有, 避免 lambda 捕获非序列化的 ssc 局部变量 */
+    private static volatile JavaStreamingContext streamingContext;
+
+    /** 优雅停止标记: 后台线程检测到此标记后从外部调用 ssc.stop() */
+    private static volatile boolean shutdownRequested = false;
 
     public static void main(String[] args) throws InterruptedException {
 
@@ -47,6 +56,10 @@ public class QuoteStreamingJob {
                 () -> createContext(conf, checkpointPath)
         );
         ssc.sparkContext().setLogLevel("INFO");
+
+        // fix: 无论新建还是 checkpoint 恢复，都需要设置 streamingContext 并启动 monitor
+        streamingContext = ssc;
+        startShutdownMonitor();
 
         // ---- 3. 启动 ----
         ssc.start();
@@ -85,6 +98,13 @@ public class QuoteStreamingJob {
 
         // ---- 核心处理 ----
         stream.foreachRDD(rdd -> {
+            // 优雅停止: 检查 shutdown marker, 置标记位让后台线程调用 stop
+            if (isShutdownRequested()) {
+                LOG.info("检测到 shutdown marker, 置停止标记");
+                shutdownRequested = true;
+                return;
+            }
+
             if (rdd.isEmpty()) {
                 return;
             }
@@ -103,8 +123,6 @@ public class QuoteStreamingJob {
             LOG.info("ODS 归档完成");
 
             // 解析 JSON → StockQuote，过滤脏数据，计算涨跌幅
-            // fix #3: 添加 name 非空检查
-            // fix #12: cache() 放在 isEmpty() 之前
             JavaRDD<StockQuote> parsedRDD = rdd.map(ConsumerRecord::value)
                     .map(QuoteStreamingJob::parseAndCalc)
                     .filter(Objects::nonNull)
@@ -129,8 +147,8 @@ public class QuoteStreamingJob {
                 // dim_stock —— 新股票代码
                 DimWriter.updateDimStock(spark, quoteDF);
 
-                // ads_market_summary —— 市场概览
-                MarketSummaryWriter.write(spark, quoteDF);
+                // 市场数据 —— Redis 实时缓存 + MySQL 归档
+                MarketDataWriter.write(parsedRDD);
 
                 // HDFS DWD 落盘 —— 离线团队的入口
                 quoteDF.write()
@@ -179,6 +197,26 @@ public class QuoteStreamingJob {
         public void setTradeDate(String tradeDate) { this.tradeDate = tradeDate; }
         public String getRawJson() { return rawJson; }
         public void setRawJson(String rawJson) { this.rawJson = rawJson; }
+    }
+
+    /** 启动 shutdown-monitor 后台线程，从外部调用 ssc.stop 避免 foreachRDD 内死锁 */
+    private static void startShutdownMonitor() {
+        Thread monitor = new Thread(() -> {
+            while (!shutdownRequested) {
+                try { Thread.sleep(2000); } catch (InterruptedException e) { break; }
+            }
+            if (streamingContext != null) {
+                LOG.info("shutdown monitor 检测到停止标记, 正在优雅停止 StreamingContext...");
+                streamingContext.stop(true, true);
+            }
+        }, "shutdown-monitor");
+        monitor.setDaemon(true);
+        monitor.start();
+    }
+
+    /** 检查 shutdown marker 文件是否存在（优雅停止） */
+    private static boolean isShutdownRequested() {
+        return new java.io.File(SHUTDOWN_MARKER).exists();
     }
 
     private static StockQuote parseAndCalc(String json) {
