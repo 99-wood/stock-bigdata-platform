@@ -85,11 +85,17 @@ public final class MarketDataWriter {
     /** Redis key 前缀 */
     static final String KEY_OHLCV_PREFIX  = "stock:quote:ohlcv:";
     static final String KEY_MARKET_SUMMARY = "stock:market:summary";
+    /** 分钟 OHLCV */
+    static final String KEY_MINUTE_PREFIX  = "stock:minute:";
+    static final String KEY_MINUTE_WINDOWS = "stock:minute:windows";
+    static final String KEY_MINUTE_CODES_PREFIX = "stock:minute:codes:";
 
     /** Lua 脚本文本（启动时从 classpath 加载） */
     private static volatile String luaScript;
-    /** Lua 脚本 SHA1（SCRIPT LOAD 后获取） */
     private static volatile String luaSha;
+    /** 分钟 Lua */
+    private static volatile String minuteLuaScript;
+    private static volatile String minuteLuaSha;
 
     /** JSON 序列化（禁用科学计数法） */
     private static final ObjectMapper MAPPER = new ObjectMapper()
@@ -124,9 +130,11 @@ public final class MarketDataWriter {
         long distinctDates = parsedRDD.map(StockQuote::getTradeDate).distinct().count();
         if (distinctDates > 1) {
             try (Jedis jedis = newJedis()) {
+                flushAll(jedis);
                 jedis.del(KEY_MARKET_SUMMARY);
                 clearOhlcvKeys(jedis);
-                LOG.warn("本批次跨天, 已清空 market:summary + OHLCV，跳过本 batch");
+                clearMinuteKeys(jedis);
+                LOG.warn("本批次跨天, flush + 清空完成，跳过本 batch");
             } catch (Exception e) {
                 LOG.error("跨天清空 Redis 失败", e);
             }
@@ -138,10 +146,12 @@ public final class MarketDataWriter {
         try (Jedis jedis = newJedis()) {
             String storedDate = jedis.hget(KEY_MARKET_SUMMARY, "stat_date");
             if (!today.equals(storedDate)) {
+                flushAll(jedis);
                 jedis.del(KEY_MARKET_SUMMARY);
                 clearOhlcvKeys(jedis);
-                jedis.hset(KEY_MARKET_SUMMARY, "stat_date", today);
-                LOG.info("日清: stat_date {} → {}, 市场汇总 + OHLCV 已重置", storedDate, today);
+                clearMinuteKeys(jedis);
+                jedis.hmset(KEY_MARKET_SUMMARY, resetSummaryFields(today));
+                LOG.info("日清: stat_date {} → {}, flush + 重置完成", storedDate, today);
             }
         } catch (Exception e) {
             LOG.error("日清检查失败", e);
@@ -160,17 +170,37 @@ public final class MarketDataWriter {
                 String sha = ensureSha(jedis);
 
                 if (usePipeline) {
-                    // Pipeline 模式: 攒整个分区为一批，一次 sync 发送全部
+                    String mSha = ensureMinuteSha(jedis);
+                    final int FLUSH_SIZE = 500;
                     redis.clients.jedis.Pipeline pipeline = jedis.pipelined();
                     while (iterator.hasNext()) {
                         StockQuote q = iterator.next();
-                        String ohlcvKey = KEY_OHLCV_PREFIX + q.getCode();
                         String json = buildOhlcvJson(q);
                         String statTime = formatStatTime(q.getTradeDate(), q.getTradeTime());
                         pipeline.evalsha(sha,
-                                Arrays.asList(ohlcvKey, KEY_MARKET_SUMMARY),
+                                Arrays.asList(KEY_OHLCV_PREFIX + q.getCode(), KEY_MARKET_SUMMARY),
                                 Arrays.asList(json, statTime));
-                        count++;
+                        String minuteWindow = toMinuteWindow(q.getTradeDate(), q.getTradeTime());
+                        if (minuteWindow != null) {
+                            String minuteTime = minuteWindow.substring(11);
+                            pipeline.evalsha(mSha,
+                                    Arrays.asList(
+                                            KEY_MINUTE_PREFIX + q.getCode() + ":" + minuteWindow,
+                                            KEY_MINUTE_CODES_PREFIX + minuteWindow,
+                                            KEY_MINUTE_WINDOWS),
+                                    Arrays.asList(
+                                            String.valueOf(q.getPrice()),
+                                            String.valueOf((long) q.getVolume()),
+                                            String.valueOf(q.getAmount()),
+                                            q.getTradeDate(),
+                                            q.getTradeTime(),
+                                            q.getCode(),
+                                            minuteTime));
+                        }
+                        if (++count % FLUSH_SIZE == 0) {
+                            pipeline.sync();
+                            pipeline = jedis.pipelined();
+                        }
                     }
                     pipeline.sync();
                 } else {
@@ -199,8 +229,8 @@ public final class MarketDataWriter {
                 }
                 LOG.info("分区写入完成, {} 条, mode={}", count, usePipeline ? "pipeline" : "plain");
             } catch (JedisNoScriptException e) {
-                // fix #1: NOSCRIPT 时必须置 null, 否则后续 ensureSha 返回过期 SHA, 级联全部失败
                 luaSha = null;
+                minuteLuaSha = null;
                 LOG.error("Pipeline NOSCRIPT, SHA 已重置, 本分区 {} 条需下 batch 重试", count, e);
             } catch (Exception e) {
                 LOG.error("Redis 分区写入失败", e);
@@ -253,6 +283,183 @@ public final class MarketDataWriter {
         }
     }
 
+    /** 加载分钟 Lua */
+    static synchronized void loadMinuteLuaScript() {
+        if (minuteLuaScript != null) return;
+        try (InputStream in = MarketDataWriter.class.getClassLoader()
+                .getResourceAsStream("redis_minute_upsert.lua")) {
+            if (in == null)
+                throw new IllegalStateException("redis_minute_upsert.lua 未找到");
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                minuteLuaScript = r.lines().collect(Collectors.joining("\n"));
+            }
+            LOG.info("分钟 Lua 加载成功, {} 字节", minuteLuaScript.length());
+        } catch (Exception e) {
+            throw new RuntimeException("分钟 Lua 加载失败", e);
+        }
+    }
+
+    private static String ensureMinuteSha(Jedis jedis) {
+        if (minuteLuaSha != null) return minuteLuaSha;
+        synchronized (MarketDataWriter.class) {
+            if (minuteLuaSha != null) return minuteLuaSha;
+            loadMinuteLuaScript();
+            minuteLuaSha = jedis.scriptLoad(minuteLuaScript);
+            LOG.info("分钟 Lua SCRIPT LOAD 成功, SHA={}", minuteLuaSha);
+            return minuteLuaSha;
+        }
+    }
+
+    /** tradeTime "HH:mm:ss" → 5分钟窗口 "yyyy-MM-dd HH:mm:00" */
+    static String toMinuteWindow(String tradeDate, String tradeTime) {
+        if (tradeDate == null || tradeTime == null) return null;
+        try {
+            int h = Integer.parseInt(tradeTime.substring(0, 2));
+            int m = Integer.parseInt(tradeTime.substring(3, 5));
+            return String.format("%s %02d:%02d:00", tradeDate, h, (m / 5) * 5);
+        } catch (Exception e) { return null; }
+    }
+
+    // ============================================================
+    // Flush: Redis 分钟 + 日线 → MySQL
+    // ============================================================
+
+    /** 公开入口：日清 / shutdown 时调用 */
+    public static void flushAll(Jedis jedis) {
+        flushAllMinute(jedis);
+        flushAllDaily(jedis);
+    }
+
+    /** 分钟 flush：遍历所有窗口 → 按 code 分组 → LAG 做差 → MySQL */
+    private static void flushAllMinute(Jedis jedis) {
+        Set<String> windows = jedis.smembers(KEY_MINUTE_WINDOWS);
+        if (windows == null || windows.isEmpty()) return;
+
+        List<String> sortedWindows = new ArrayList<>(windows);
+        Collections.sort(sortedWindows);
+
+        // 收集所有数据: code → window → Map<field, value>
+        Map<String, Map<String, Map<String, String>>> all = new LinkedHashMap<>();
+        for (String window : sortedWindows) {
+            String codesKey = KEY_MINUTE_CODES_PREFIX + window;
+            Set<String> codes = jedis.smembers(codesKey);
+            if (codes == null) continue;
+            for (String code : codes) {
+                Map<String, String> m = jedis.hgetAll(KEY_MINUTE_PREFIX + code + ":" + window);
+                if (m == null || m.isEmpty()) continue;
+                all.computeIfAbsent(code, k -> new LinkedHashMap<>()).put(window, m);
+            }
+        }
+
+        int total = 0;
+        try (Connection conn = DriverManager.getConnection(
+                Config.mysqlUrl(), Config.mysqlUser(), Config.mysqlPassword())) {
+            conn.setAutoCommit(false);
+            String sql = "REPLACE INTO dws_stock_minute " +
+                    "(code, minute_time, open, high, low, close, volume, amount) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+                for (Map.Entry<String, Map<String, Map<String, String>>> entry : all.entrySet()) {
+                    String code = entry.getKey();
+                    long prevVol = 0;
+                    double prevAmt = 0;
+
+                    for (String window : sortedWindows) {
+                        Map<String, String> m = entry.getValue().get(window);
+                        if (m == null) continue;
+
+                        long lastVol  = Long.parseLong(m.getOrDefault("last_vol", "0"));
+                        double lastAmt = Double.parseDouble(m.getOrDefault("last_amt", "0"));
+
+                        ps.setString(1, code);
+                        ps.setString(2, window);
+                        ps.setBigDecimal(3, new BigDecimal(m.getOrDefault("open", "0")));
+                        ps.setBigDecimal(4, new BigDecimal(m.getOrDefault("high", "0")));
+                        ps.setBigDecimal(5, new BigDecimal(m.getOrDefault("low", "0")));
+                        ps.setBigDecimal(6, new BigDecimal(m.getOrDefault("close", "0")));
+                        ps.setLong(7, Math.max(lastVol - prevVol, 0));
+                        ps.setBigDecimal(8, BigDecimal.valueOf(lastAmt - prevAmt));
+                        ps.addBatch();
+
+                        prevVol = lastVol;
+                        prevAmt = lastAmt;
+
+                        if (++total % 1000 == 0) ps.executeBatch();
+                    }
+                }
+                ps.executeBatch();
+                conn.commit();
+            } catch (Exception e) { conn.rollback(); throw e; }
+        } catch (Exception e) {
+            LOG.error("分钟 flush 失败", e);
+        }
+        LOG.info("分钟 flush 完成: {} 条, {} 窗口", total, sortedWindows.size());
+    }
+
+    /** 日线 flush：OHLCV 快照 → MySQL dws_stock_day */
+    private static void flushAllDaily(Jedis jedis) {
+        Set<String> keys = jedis.keys(KEY_OHLCV_PREFIX + "*");
+        if (keys == null || keys.isEmpty()) return;
+
+        int total = 0;
+        try (Connection conn = DriverManager.getConnection(
+                Config.mysqlUrl(), Config.mysqlUser(), Config.mysqlPassword())) {
+            conn.setAutoCommit(false);
+            String sql = "REPLACE INTO dws_stock_day " +
+                    "(code, trade_date, open, high, low, close, volume, amount, change_pct) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                for (String key : keys) {
+                    String code = key.substring(KEY_OHLCV_PREFIX.length());
+                    String json = jedis.get(key);
+                    if (json == null) continue;
+                    try {
+                        StockQuote q = MAPPER.readValue(json, StockQuote.class);
+                        ps.setString(1, code);
+                        ps.setString(2, q.getTradeDate());
+                        ps.setBigDecimal(3, bd2(q.getOpen()));
+                        ps.setBigDecimal(4, bd2(q.getHigh()));
+                        ps.setBigDecimal(5, bd2(q.getLow()));
+                        ps.setBigDecimal(6, bd2(q.getPrice()));
+                        ps.setLong(7, (long) q.getVolume());
+                        ps.setBigDecimal(8, bd2(q.getAmount()));
+                        ps.setBigDecimal(9, bd2(q.getChangePct()));
+                        ps.addBatch();
+                        if (++total % 1000 == 0) ps.executeBatch();
+                    } catch (Exception e) {
+                        LOG.warn("日线解析失败: {}", key, e);
+                    }
+                }
+                ps.executeBatch();
+                conn.commit();
+            } catch (Exception e) { conn.rollback(); throw e; }
+        } catch (Exception e) {
+            LOG.error("日线 flush 失败", e);
+        }
+        LOG.info("日线 flush 完成: {} 条", total);
+    }
+
+    /** 日清时删除所有分钟 key（用 SET 遍历，避免 KEYS 阻塞） */
+    static void clearMinuteKeys(Jedis jedis) {
+        Set<String> windows = jedis.smembers(KEY_MINUTE_WINDOWS);
+        if (windows != null && !windows.isEmpty()) {
+            int count = 0;
+            for (String window : windows) {
+                String codesKey = KEY_MINUTE_CODES_PREFIX + window;
+                Set<String> codes = jedis.smembers(codesKey);
+                if (codes != null) {
+                    for (String code : codes) {
+                        jedis.del(KEY_MINUTE_PREFIX + code + ":" + window);
+                        count++;
+                    }
+                }
+                jedis.del(codesKey);
+            }
+            jedis.del(KEY_MINUTE_WINDOWS);
+            LOG.info("日清: 删除 {} 个分钟 key", count);
+        }
+    }
     // ============================================================
     // MySQL 归档
     // ============================================================
@@ -320,6 +527,22 @@ public final class MarketDataWriter {
     // ============================================================
     // 工具方法
     // ============================================================
+
+    /** 日清时预置 summary Hash 全部字段为 0, stat_date 为当日 */
+    private static Map<String, String> resetSummaryFields(String statDate) {
+        Map<String, String> map = new HashMap<>();
+        map.put("stat_date",     statDate);
+        map.put("stat_time",     "");
+        map.put("total_stocks",  "0");
+        map.put("up_count",      "0");
+        map.put("down_count",    "0");
+        map.put("flat_count",    "0");
+        map.put("_sum_pct",      "0");
+        map.put("total_volume",  "0");
+        map.put("total_amount",  "0");
+        map.put("avg_change_pct","0");
+        return map;
+    }
 
     /** 日清时删除所有 OHLCV key */
     static void clearOhlcvKeys(Jedis jedis) {

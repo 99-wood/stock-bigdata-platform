@@ -36,6 +36,10 @@ if do_cmd "$MID_HOST" 'hostname' >/dev/null 2>&1; then
     do_cmd "$MID_HOST" 'export JAVA_HOME=/root/jdk1.8.0_171 && /root/kafka/bin/kafka-server-start.sh -daemon /root/kafka/config/server.properties'
     echo "  OK"
 
+    echo "[mid] Kafka Topic 初始化..."
+    do_cmd "$MID_HOST" 'export JAVA_HOME=/root/jdk1.8.0_171 && bash /root/kafka-topic-init.sh'
+    echo "  OK"
+
     echo "[mid] Redis..."
     do_cmd "$MID_HOST" 'systemctl start redis-server'
     echo "  OK"
