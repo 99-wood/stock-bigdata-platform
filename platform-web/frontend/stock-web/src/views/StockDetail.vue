@@ -1,35 +1,23 @@
 <template>
-  <div class="stock-detail-page">
-    <!-- Top Bar -->
-    <header class="page-header">
-      <button class="nav-btn" @click="router.back()" title="返回">
-        <el-icon><ArrowLeft /></el-icon>
-      </button>
-      <span class="header-divider">|</span>
-      <button class="nav-btn" @click="router.push('/dashboard')" title="大盘">
-        <el-icon><DataBoard /></el-icon>
-        大盘
-      </button>
-      <span class="header-divider">|</span>
-      <button class="nav-btn" @click="router.push('/stocks')" title="列表">
-        <el-icon><List /></el-icon>
-        列表
-      </button>
-      <span class="header-divider">|</span>
-      <span class="header-label">STOCK DETAIL</span>
+  <div class="page">
+    <header class="topbar">
+      <button class="tb-btn" @click="router.back()"><el-icon><ArrowLeft /></el-icon></button>
+      <span class="tb-div"></span>
+      <router-link to="/" class="tb-btn"><el-icon><DataBoard /></el-icon><span>大盘</span></router-link>
+      <span class="tb-div"></span>
+      <router-link to="/stocks" class="tb-btn"><el-icon><List /></el-icon><span>扫描</span></router-link>
+      <span class="tb-div"></span>
+      <span class="tb-label">STOCK DETAIL</span>
     </header>
 
-    <!-- Loading -->
-    <div v-if="loading" class="loading-box"><el-skeleton :rows="6" animated /></div>
+    <div v-if="loading" class="loading"><el-skeleton :rows="6" animated /></div>
 
-    <!-- Not Found -->
-    <div v-else-if="!stock" class="empty-box">
-      <div class="empty-icon">!</div>
-      <p class="empty-title">股票未找到</p>
-      <p class="empty-hint">该股票代码暂无实时五档行情</p>
+    <div v-else-if="!stock" class="not-found">
+      <div class="nf-icon">!</div>
+      <p class="nf-title">股票未找到</p>
+      <p class="nf-hint">该股票代码暂无实时行情数据</p>
     </div>
 
-    <!-- Stock Detail Panel -->
     <StockDetailPanel v-else :stock="stock" />
   </div>
 </template>
@@ -41,20 +29,14 @@ import { ArrowLeft, DataBoard, List } from '@element-plus/icons-vue'
 import { stockApi } from '@/api/request'
 import StockDetailPanel from '@/components/StockDetailPanel.vue'
 
-const route = useRoute()
-const router = useRouter()
-const stock = ref(null)
-const loading = ref(true)
+const route = useRoute(); const router = useRouter()
+const stock = ref(null); const loading = ref(true)
 
 async function fetchStock(code) {
   loading.value = true
-  try {
-    stock.value = await stockApi.getStockDetail(code)
-  } catch (e) {
-    stock.value = null
-  } finally {
-    loading.value = false
-  }
+  try { stock.value = await stockApi.getStockDetail(code) }
+  catch { stock.value = null }
+  finally { loading.value = false }
 }
 
 onMounted(() => fetchStock(route.params.code))
@@ -62,79 +44,43 @@ watch(() => route.params.code, c => { if (c) fetchStock(c) })
 </script>
 
 <style scoped>
-.stock-detail-page {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 20px 24px;
-  min-height: 100vh;
-  background: #0D1117;
+.page {
+  max-width: 960px; margin: 0 auto; padding: 20px 24px 48px;
+  min-height: 100vh; background: var(--bg-root);
 }
 
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 0 16px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid #2D3340;
+.topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 14px; margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.nav-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: 1px solid #2D3340;
-  border-radius: 3px;
-  color: #8892A0;
-  cursor: pointer;
-  font-size: 12px;
-  padding: 5px 10px;
-  transition: all 0.1s;
-  font-family: inherit;
+.tb-btn {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); color: var(--text-secondary);
+  cursor: pointer; font-size: 12px; font-weight: 500;
+  padding: 6px 12px; text-decoration: none; font-family: inherit;
+  transition: all .15s;
 }
+.tb-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg) }
 
-.nav-btn:hover {
-  border-color: #58A6FF;
-  color: #58A6FF;
+.tb-div { width: 1px; height: 16px; background: var(--border-default) }
+
+.tb-label { font-size: 10px; font-weight: 600; color: var(--text-muted); letter-spacing: .1em }
+
+.loading { padding: 40px 0 }
+
+.not-found {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 100px 0; gap: 8px;
 }
-
-.header-divider {
-  color: #2D3340;
-}
-
-.header-label {
-  font-size: 11px;
-  color: #636D7E;
-  letter-spacing: 0.08em;
-  font-weight: 600;
-}
-
-.loading-box { padding: 40px 0; }
-
-.empty-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 0;
-  gap: 8px;
-}
-
-.empty-icon {
-  width: 36px;
-  height: 36px;
-  border: 1px solid #D29922;
-  color: #D29922;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-weight: 700;
-  font-size: 18px;
+.nf-icon {
+  width: 44px; height: 44px; border: 1px solid var(--stock-warn);
+  color: var(--stock-warn); display: flex; align-items: center;
+  justify-content: center; border-radius: 50%; font-weight: 700; font-size: 20px;
   margin-bottom: 8px;
 }
-
-.empty-title { font-size: 16px; color: #8892A0; margin: 0; }
-.empty-hint { font-size: 13px; color: #636D7E; margin: 0; }
+.nf-title { font-size: 17px; font-weight: 600; color: var(--text-secondary) }
+.nf-hint  { font-size: 13px; color: var(--text-muted) }
 </style>

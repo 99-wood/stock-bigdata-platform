@@ -241,6 +241,8 @@ public class RedisService {
                 StockLatestDTO stock = objectMapper.readValue(json, StockLatestDTO.class);
                 RankItemDTO item = RankItemDTO.builder()
                         .code(codes.get(i))
+                        .name(stock.getName())
+                        .price(stock.getPrice())
                         .bid(stock.getBid())
                         .ask(stock.getAsk())
                         .tradeDate(stock.getTradeDate())

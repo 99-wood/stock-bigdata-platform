@@ -13,6 +13,8 @@ import lombok.NoArgsConstructor;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class RankItemDTO {
     private String code;
+    private String name;
+    private Double price;
     private Double bid;
     private Double ask;
     private String tradeDate;

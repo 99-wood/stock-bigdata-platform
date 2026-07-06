@@ -1,106 +1,113 @@
 <template>
   <div class="dashboard">
-    <!-- Header -->
-    <header class="dashboard-header">
-      <h1 class="app-title">股票大数据平台</h1>
-      <div class="header-left-actions">
-        <el-button size="small" @click="$router.push('/stocks')">
-          <el-icon><List /></el-icon>
-          个股列表
-        </el-button>
-      </div>
-      <div class="header-search">
-        <el-select
-          v-model="searchCode"
-          filterable
-          remote
-          clearable
-          reserve-keyword
-          :remote-method="onSearch"
-          :loading="searchLoading"
-          placeholder="输入股票代码或名称搜索..."
-          size="default"
-          popper-class="stock-search-dropdown"
-          @change="onSearchSelect"
-        >
-          <el-option
-            v-for="item in searchOptions"
-            :key="item.code"
-            :label="`${item.name} (${item.code})`"
-            :value="item.code"
+    <!-- ═══ Sticky Header ═══ -->
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="header-brand">
+          <router-link to="/" class="brand-link">
+            <span class="brand-icon">◆</span>
+            <h1 class="brand-title gradient-text">StockPulse</h1>
+          </router-link>
+        </div>
+
+        <nav class="header-nav">
+          <router-link to="/" class="nav-item" exact-active-class="nav-active">大盘</router-link>
+          <router-link to="/stocks" class="nav-item" active-class="nav-active">扫描</router-link>
+          <router-link to="/admin" class="nav-item" active-class="nav-active">管理</router-link>
+        </nav>
+
+        <div class="header-search">
+          <el-select
+            v-model="searchCode"
+            filterable remote clearable reserve-keyword
+            :remote-method="onSearch"
+            :loading="searchLoading"
+            placeholder="搜索股票..."
+            size="default"
+            popper-class="search-dropdown"
+            @change="onSearchSelect"
           >
-            <div class="search-option">
-              <span class="opt-name">{{ item.name }}</span>
-              <span class="opt-code">{{ item.code }}</span>
-              <span class="opt-price">{{ item.price?.toFixed(2) }}</span>
-            </div>
-          </el-option>
-        </el-select>
-      </div>
-      <div class="header-right">
-        <el-tag :type="store.wsConnected ? 'success' : 'danger'" size="small" effect="dark">
-          {{ store.wsConnected ? '实时连接' : '未连接' }}
-        </el-tag>
-        <el-button size="small" @click="refreshAll" :loading="store.loading">
-          <el-icon><Refresh /></el-icon>
-          刷新
-        </el-button>
+            <el-option v-for="s in searchOptions" :key="s.code" :label="`${s.name||s.code} (${s.code})`" :value="s.code">
+              <div class="search-row">
+                <span class="sr-name">{{ s.name || s.code }}</span>
+                <span class="sr-code">{{ s.code }}</span>
+                <span class="sr-price">{{ s.price?.toFixed(2) }}</span>
+              </div>
+            </el-option>
+          </el-select>
+        </div>
+
+        <div class="header-status">
+          <span class="live-dot" :class="{ on: store.wsConnected }"></span>
+          <span class="live-text">{{ store.wsConnected ? 'LIVE' : 'OFFLINE' }}</span>
+          <button class="icon-btn" @click="refreshAll" :disabled="store.loading" title="Refresh">
+            <el-icon :class="{ spin: store.loading }"><Refresh /></el-icon>
+          </button>
+        </div>
       </div>
     </header>
 
-    <!-- Unified 4-column grid: summary card + rank panel per column -->
-    <div class="unified-grid">
-      <!-- Col 1: 上涨家数 → 涨幅榜 -->
-      <div class="grid-col">
-        <div class="summary-card up">
-          <div class="card-label">上涨家数</div>
-          <div class="card-value up-color">
-            <el-icon><CaretTop /></el-icon>
-            {{ fmtNum(store.marketSummary.upCount) }}
-          </div>
-          <div class="card-ratio">占比 {{ store.upRatio }}%</div>
+    <div class="dashboard-content">
+      <!-- ═══ KPI Strip ═══ -->
+      <section class="kpi-strip">
+        <div class="kpi-card">
+          <span class="kpi-label">上涨家数</span>
+          <span class="kpi-value up">
+            <el-icon class="kpi-arrow"><CaretTop /></el-icon>
+            {{ fmt(store.marketSummary.upCount) }}
+          </span>
+          <span class="kpi-sub">{{ store.upRatio }}%</span>
         </div>
-        <RankPanel title="📈 涨幅榜 Top 20" :data="store.topUp" type="up" @select="onStockSelect" />
-      </div>
+        <div class="kpi-card">
+          <span class="kpi-label">下跌家数</span>
+          <span class="kpi-value down">
+            <el-icon class="kpi-arrow"><CaretBottom /></el-icon>
+            {{ fmt(store.marketSummary.downCount) }}
+          </span>
+          <span class="kpi-sub">{{ store.downRatio }}%</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">平盘家数</span>
+          <span class="kpi-value flat">{{ fmt(store.marketSummary.flatCount) }}</span>
+          <span class="kpi-sub">{{ store.flatRatio }}%</span>
+        </div>
+        <div class="kpi-card" :class="avgDirection">
+          <span class="kpi-label">平均涨跌幅</span>
+          <span class="kpi-value" :class="avgDirection">{{ fmtPct(store.marketSummary.avgChangePct) }}</span>
+        </div>
+      </section>
 
-      <!-- Col 2: 下跌家数 → 跌幅榜 -->
-      <div class="grid-col">
-        <div class="summary-card down">
-          <div class="card-label">下跌家数</div>
-          <div class="card-value down-color">
-            <el-icon><CaretBottom /></el-icon>
-            {{ fmtNum(store.marketSummary.downCount) }}
-          </div>
-          <div class="card-ratio">占比 {{ store.downRatio }}%</div>
-        </div>
-        <RankPanel title="📉 跌幅榜 Top 20" :data="store.topDown" type="down" @select="onStockSelect" />
-      </div>
+      <!-- ═══ 4-Column Rank Grid ═══ -->
+      <section class="rank-grid">
+        <RankPanel title="涨幅榜" :data="store.topUp" type="up" @select="goStock" />
+        <RankPanel title="跌幅榜" :data="store.topDown" type="down" @select="goStock" />
+        <RankPanel title="成交额榜" :data="store.topAmount" type="amount" @select="goStock" />
+        <RankPanel title="量化评分榜" :data="topQuant" type="quant" @select="goStock" />
+      </section>
 
-      <!-- Col 3: 平盘家数 → 成交额榜 -->
-      <div class="grid-col">
-        <div class="summary-card flat">
-          <div class="card-label">平盘家数</div>
-          <div class="card-value flat-color">{{ fmtNum(store.marketSummary.flatCount) }}</div>
-          <div class="card-ratio">占比 {{ store.flatRatio }}%</div>
+      <!-- ═══ Stats Footer ═══ -->
+      <footer class="stats-bar" v-if="store.marketSummary.statTime">
+        <div class="stat">
+          <span class="stat-label">统计时间</span>
+          <span class="stat-value accent">{{ store.marketSummary.statTime }}</span>
         </div>
-        <RankPanel title="💰 成交额榜 Top 20" :data="store.topAmount" type="amount" @select="onStockSelect" />
-      </div>
-
-      <!-- Col 4: 平均涨跌幅 → 量化评分榜 -->
-      <div class="grid-col">
-        <div class="summary-card" :class="avgClass">
-          <div class="card-label">平均涨跌幅</div>
-          <div class="card-value" :class="avgClass + '-color'">{{ fmtPct(store.marketSummary.avgChangePct) }}</div>
-          <div class="card-ratio">&nbsp;</div>
+        <div class="stat">
+          <span class="stat-label">标的数量</span>
+          <span class="stat-value">{{ fmt(store.marketSummary.totalStocks) }} 只</span>
         </div>
-        <RankPanel title="🎯 量化评分榜 Top 20" :data="store.topAmount.slice(0,10)" type="quant" @select="onStockSelect" />
-      </div>
+        <div class="stat">
+          <span class="stat-label">总成交量</span>
+          <span class="stat-value">{{ fmt(store.marketSummary.totalVolume) }} 手</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">总成交额</span>
+          <span class="stat-value">{{ fmt(store.marketSummary.totalAmount) }} 万元</span>
+        </div>
+      </footer>
     </div>
 
-    <!-- Alert Ticker -->
-    <div class="alert-section">
-      <AlertTicker :alerts="store.alerts" />
-    </div>
+    <!-- ═══ Glass Alert Ticker ═══ -->
+    <AlertTicker :alerts="store.alerts" />
   </div>
 </template>
 
@@ -108,7 +115,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, List, CaretTop, CaretBottom } from '@element-plus/icons-vue'
+import { Refresh, CaretTop, CaretBottom } from '@element-plus/icons-vue'
 import { useStockStore } from '@/stores/stock'
 import { connectWebSocket, disconnectWebSocket } from '@/api/websocket'
 import { stockApi } from '@/api/request'
@@ -118,57 +125,36 @@ import AlertTicker from '@/components/AlertTicker.vue'
 const store = useStockStore()
 const router = useRouter()
 
-// ---- Helpers ----
-function fmtNum(n) {
-  if (n == null) return '--'
-  return n.toLocaleString()
-}
+function fmt(n) { return n != null ? n.toLocaleString() : '--' }
 function fmtPct(v) {
   if (v == null) return '--'
-  const sign = v > 0 ? '+' : ''
-  return `${sign}${v.toFixed(2)}%`
+  return (v > 0 ? '+' : '') + v.toFixed(2) + '%'
 }
-const avgClass = computed(() => {
+
+const avgDirection = computed(() => {
   const v = store.marketSummary.avgChangePct
   if (v > 0) return 'up'
   if (v < 0) return 'down'
-  return 'flat'
+  return ''
 })
 
-// ---- Search ----
+const topQuant = computed(() => store.topAmount.slice(0, 10))
+
 const searchCode = ref('')
 const searchOptions = ref([])
 const searchLoading = ref(false)
 
-async function onSearch(keyword) {
-  if (!keyword || keyword.trim().length < 1) {
-    searchOptions.value = []
-    return
-  }
+async function onSearch(kw) {
+  if (!kw || kw.trim().length < 1) { searchOptions.value = []; return }
   searchLoading.value = true
-  try {
-    const list = await stockApi.getStockList(keyword.trim())
-    searchOptions.value = (list || []).slice(0, 50)
-  } catch (e) {
-    console.error('Search error:', e)
-    searchOptions.value = []
-  } finally {
-    searchLoading.value = false
-  }
+  try { searchOptions.value = ((await stockApi.getStockList(kw.trim())) || []).slice(0, 20) }
+  catch { searchOptions.value = [] }
+  finally { searchLoading.value = false }
 }
 
-function onSearchSelect(code) {
-  if (code) {
-    router.push(`/stock/${code}`)
-  }
-}
+function onSearchSelect(code) { if (code) goStock(code) }
+function goStock(code) { router.push(`/stock/${code}`) }
 
-// ---- Stock Select ----
-function onStockSelect(code) {
-  router.push(`/stock/${code}`)
-}
-
-// ---- Refresh ----
 async function refreshAll() {
   await store.fetchAll()
   ElMessage.success('数据已刷新')
@@ -178,177 +164,212 @@ onMounted(() => {
   store.fetchAll()
   connectWebSocket({
     onConnected: () => { store.wsConnected = true },
-    onMarket: (data) => { store.updateMarketSummary(data) },
-    onRankUp: (data) => { store.updateTopUp(data) },
-    onRankDown: (data) => { store.updateTopDown(data) },
-    onRankAmount: (data) => { store.updateTopAmount(data) },
+    onMarket: (d) => { store.updateMarketSummary(d) },
+    onRankUp: (d) => { store.updateTopUp(d) },
+    onRankDown: (d) => { store.updateTopDown(d) },
+    onRankAmount: (d) => { store.updateTopAmount(d) },
     onError: () => { store.wsConnected = false }
   })
 })
 
-onUnmounted(() => {
-  disconnectWebSocket()
-  store.wsConnected = false
-})
+onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 </script>
 
 <style scoped>
 .dashboard {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 16px 24px;
   min-height: 100vh;
-}
-
-.dashboard-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 0;
-  margin-bottom: 16px;
-  border-bottom: 1px solid #303a5c;
-  gap: 16px;
-}
-
-.app-title {
-  font-size: 26px;
-  font-weight: 700;
-  background: linear-gradient(90deg, #409eff, #67c23a);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  flex-shrink: 0;
-}
-
-.header-search {
-  flex: 1;
-  max-width: 400px;
-}
-
-.header-left-actions {
-  flex-shrink: 0;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-/* ---- Unified 4-Column Grid ---- */
-.unified-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin: 16px 0 20px;
-}
-
-.grid-col {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  background: var(--bg-root);
 }
 
-/* ---- Inline Summary Card ---- */
-.summary-card {
-  padding: 16px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, #1a1f3a 0%, #252b48 100%);
-  border: 1px solid #303a5c;
+/* ═══ Header ═══ */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: 56px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-.summary-card.up   { border-top: 3px solid #e15241; }
-.summary-card.down { border-top: 3px solid #3cb371; }
-.summary-card.flat { border-top: 3px solid #909399; }
-
-.card-label {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 6px;
+.header-inner {
+  max-width: 1600px;
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 24px;
 }
 
-.card-value {
-  font-size: 24px;
+.header-brand { flex-shrink: 0 }
+
+.brand-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.brand-icon {
+  font-size: 18px;
+  color: var(--accent);
+}
+
+.brand-title {
+  font-size: 16px;
   font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.header-nav {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.nav-item {
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: all .15s;
+}
+
+.nav-item:hover { color: var(--text-primary); background: var(--bg-hover) }
+.nav-active { color: var(--accent); background: var(--accent-bg) }
+
+.header-search { flex: 1; max-width: 340px }
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.live-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background .3s, box-shadow .3s;
+}
+.live-dot.on { background: var(--stock-down); box-shadow: 0 0 6px rgba(63,185,80,.5) }
+
+.live-text {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: .08em; color: var(--text-muted);
+}
+
+.icon-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  background: none; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); color: var(--text-secondary);
+  cursor: pointer; font-size: 15px; transition: all .15s;
+}
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg) }
+.icon-btn:disabled { opacity: .3; cursor: default }
+
+.spin { animation: rot 1s linear infinite }
+@keyframes rot { to { transform: rotate(360deg) } }
+
+/* ═══ Content ═══ */
+.dashboard-content {
+  flex: 1;
+  max-width: 1600px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 24px 0;
+}
+
+/* ═══ KPI Strip ═══ */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.kpi-card {
+  padding: 18px 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  transition: border-color .2s;
+}
+.kpi-card:hover { border-color: var(--border-strong) }
+
+.kpi-label { /* inherits global .kpi-label */ }
+
+.kpi-value {
+  font-size: 30px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
   display: flex;
   align-items: center;
   gap: 4px;
 }
+.kpi-value.up   { color: var(--stock-up) }
+.kpi-value.down { color: var(--stock-down) }
+.kpi-value.flat { color: var(--text-secondary) }
 
-.card-value.up-color   { color: #e15241; }
-.card-value.down-color { color: #3cb371; }
-.card-value.flat-color { color: #909399; }
+.kpi-arrow { font-size: 20px }
 
-.card-ratio {
+.kpi-sub {
+  display: block;
   font-size: 11px;
-  color: #909399;
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
-.alert-section {
-  margin-top: 20px;
-  position: sticky;
-  bottom: 0;
-  z-index: 100;
+.kpi-card.up   { border-left: 2px solid var(--stock-up) }
+.kpi-card.down { border-left: 2px solid var(--stock-down) }
+
+/* ═══ Rank Grid ═══ */
+.rank-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
 }
 
-/* Search option styling */
-.search-option {
+/* ═══ Stats Footer ═══ */
+.stats-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 12px;
+  gap: 36px;
+  padding: 14px 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  margin-bottom: 24px;
+  flex-wrap: wrap;
 }
 
-.opt-name { font-weight: 500; color: #303133; }
-.opt-code { color: #909399; font-size: 12px; font-family: monospace; }
-.opt-price { color: #409eff; font-weight: 600; margin-left: auto; }
+.stat { display: flex; flex-direction: column; gap: 2px }
+.stat-label { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em }
+.stat-value { font-size: 13px; font-weight: 500; color: var(--text-primary) }
+.stat-value.accent { color: var(--accent); font-family: var(--font-mono); font-size: 12px }
+
+/* ═══ Search dropdown ═══ */
+.search-row { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px }
+.sr-name { font-weight: 500 }
+.sr-code { color: var(--text-muted); font-size: 12px; font-family: var(--font-mono) }
+.sr-price { color: var(--accent); font-weight: 600; margin-left: auto }
 
 @media (max-width: 1400px) {
-  .unified-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  .kpi-strip, .rank-grid { grid-template-columns: repeat(2, 1fr) }
 }
-
 @media (max-width: 768px) {
-  .unified-grid {
-    grid-template-columns: 1fr;
-  }
-  .dashboard-header {
-    flex-wrap: wrap;
-  }
-  .header-search {
-    max-width: 100%;
-    order: 3;
-    width: 100%;
-  }
-}
-</style>
-
-<!-- Global style for dark-themed dropdown -->
-<style>
-.stock-search-dropdown {
-  background: #1a1f3a !important;
-  border: 1px solid #303a5c !important;
-}
-.stock-search-dropdown .el-select-dropdown__item {
-  color: #e0e6ed !important;
-}
-.stock-search-dropdown .el-select-dropdown__item.hover,
-.stock-search-dropdown .el-select-dropdown__item:hover {
-  background: rgba(64, 158, 255, 0.15) !important;
-}
-.stock-search-dropdown .el-select-dropdown__item .opt-name,
-.stock-search-dropdown .el-select-dropdown__item .opt-code {
-  color: #e0e6ed !important;
-}
-.stock-search-dropdown .el-select-dropdown__item .opt-price {
-  color: #409eff !important;
-}
-.stock-search-dropdown .el-popper__arrow::before {
-  background: #1a1f3a !important;
-  border: 1px solid #303a5c !important;
+  .kpi-strip, .rank-grid { grid-template-columns: 1fr }
+  .header-nav { display: none }
+  .header-search { max-width: 100% }
 }
 </style>
