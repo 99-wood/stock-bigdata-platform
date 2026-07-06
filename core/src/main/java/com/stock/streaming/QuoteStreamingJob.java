@@ -41,43 +41,37 @@ public class QuoteStreamingJob {
     /** 优雅停止标记: 后台线程检测到此标记后从外部调用 ssc.stop() */
     private static volatile boolean shutdownRequested = false;
 
+    private static boolean replayMode = false;
+
     public static void main(String[] args) throws InterruptedException {
 
-        // ---- 1. SparkConf ----
+        for (String arg : args) {
+            if ("--replay".equals(arg)) replayMode = true;
+        }
+
+        // ---- 1. StreamingContext（去 checkpoint，offset 由 Kafka 管理） ----
         SparkConf conf = new SparkConf()
                 .setAppName("QuoteStreamingJob")
                 .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
                 .set("spark.streaming.stopGracefullyOnShutdown", "true");
 
-        // ---- 2. StreamingContext：getOrCreate 支持 checkpoint 恢复 ----
-        String checkpointPath = Config.hdfsCheckpointPath();
-        JavaStreamingContext ssc = JavaStreamingContext.getOrCreate(
-                checkpointPath,
-                () -> createContext(conf, checkpointPath)
-        );
+        JavaStreamingContext ssc = createContext(conf);
         ssc.sparkContext().setLogLevel("INFO");
 
-        // fix: 无论新建还是 checkpoint 恢复，都需要设置 streamingContext 并启动 monitor
         streamingContext = ssc;
         startShutdownMonitor();
 
-        // ---- 3. 启动 ----
+        // ---- 2. 启动 ----
         ssc.start();
-        LOG.info("QuoteStreamingJob 已启动, 等待数据...");
+        LOG.info("QuoteStreamingJob 已启动, {}模式, 等待数据...", replayMode ? "replay" : "正常");
         ssc.awaitTermination();
     }
 
-    private static JavaStreamingContext createContext(SparkConf conf, String checkpointPath) {
-        LOG.info("Creating new StreamingContext (checkpoint not found or invalid)");
+    private static JavaStreamingContext createContext(SparkConf conf) {
         JavaStreamingContext ssc = new JavaStreamingContext(
                 conf,
                 Durations.seconds(Config.batchDurationSeconds())
         );
-        ssc.checkpoint(checkpointPath);
-
-        SparkSession spark = SparkSession.builder()
-                .sparkContext(ssc.sparkContext().sc())
-                .getOrCreate();
 
         // ---- Kafka 配置 ----
         Map<String, Object> kafkaParams = new HashMap<>();
@@ -85,7 +79,7 @@ public class QuoteStreamingJob {
         kafkaParams.put("key.deserializer", StringDeserializer.class);
         kafkaParams.put("value.deserializer", StringDeserializer.class);
         kafkaParams.put("group.id", Config.kafkaGroupId());
-        kafkaParams.put("auto.offset.reset", "latest");  // fix #6: 生产用 latest，避免全量重放
+        kafkaParams.put("auto.offset.reset", replayMode ? "earliest" : "latest");
         kafkaParams.put("enable.auto.commit", false);
 
         Collection<String> topics = Collections.singletonList(Config.kafkaTopic());
@@ -115,6 +109,9 @@ public class QuoteStreamingJob {
             }
 
             // ODS 层 —— 原始 JSON 归档
+            SparkSession spark = SparkSession.builder()
+                    .sparkContext(rdd.context())
+                    .getOrCreate();
             Dataset<Row> rawDF = spark.createDataFrame(
                     rdd.map(r -> {
                         String json = r.value();

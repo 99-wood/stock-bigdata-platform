@@ -355,7 +355,7 @@ public final class MarketDataWriter {
         try (Connection conn = DriverManager.getConnection(
                 Config.mysqlUrl(), Config.mysqlUser(), Config.mysqlPassword())) {
             conn.setAutoCommit(false);
-            String sql = "INSERT INTO dws_stock_minute " +
+            String sql = "REPLACE INTO dws_stock_minute " +
                     "(code, minute_time, open, high, low, close, volume, amount) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -406,7 +406,7 @@ public final class MarketDataWriter {
         try (Connection conn = DriverManager.getConnection(
                 Config.mysqlUrl(), Config.mysqlUser(), Config.mysqlPassword())) {
             conn.setAutoCommit(false);
-            String sql = "INSERT INTO dws_stock_day " +
+            String sql = "REPLACE INTO dws_stock_day " +
                     "(code, trade_date, open, high, low, close, volume, amount, change_pct) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
