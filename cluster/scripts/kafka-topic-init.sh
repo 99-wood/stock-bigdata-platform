@@ -19,7 +19,7 @@ ZKHOST=${ZKHOST:-localhost:2181}
 #   partitions: 分区数（并行消费能力）
 #   replication: 副本数（实训单机 Kafka，固定 1）
 declare -A TOPICS=(
-    [stock_quote_raw]="3:1"
+    [stock_quote_raw]="6:1"
 )
 
 echo "=========================================="

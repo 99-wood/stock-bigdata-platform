@@ -44,12 +44,12 @@ for topic in "${TOPICS[@]}"; do
         sleep 1
     done
 
-    echo "[CREATE] 重建 topic '$topic' (3 partitions, 1 replica)"
+    echo "[CREATE] 重建 topic '$topic' (6 partitions, 1 replica)"
     $KAFKA_HOME/bin/kafka-topics.sh \
         --zookeeper "$ZKHOST" \
         --create \
         --topic "$topic" \
-        --partitions 3 \
+        --partitions 6 \
         --replication-factor 1
 
     echo "[OK] topic '$topic' 已清空重建"

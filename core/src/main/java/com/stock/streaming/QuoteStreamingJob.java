@@ -98,9 +98,14 @@ public class QuoteStreamingJob {
 
         // ---- 核心处理 ----
         stream.foreachRDD(rdd -> {
-            // 优雅停止: 检查 shutdown marker, 置标记位让后台线程调用 stop
+            // 优雅停止: flush → 置标记 → 后台线程 stop
             if (isShutdownRequested()) {
-                LOG.info("检测到 shutdown marker, 置停止标记");
+                LOG.info("检测到 shutdown marker, flush 数据...");
+                try (redis.clients.jedis.Jedis jedis = MarketDataWriter.newJedis()) {
+                    MarketDataWriter.flushAll(jedis);
+                } catch (Exception e) {
+                    LOG.error("shutdown flush 失败", e);
+                }
                 shutdownRequested = true;
                 return;
             }
