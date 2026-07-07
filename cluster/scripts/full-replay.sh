@@ -37,9 +37,8 @@ sleep 10
 
 # ---- 3. 等待消费完成 ----
 echo "[3/5] 等待消费完成 (Kafka lag=0)..."
-MAX_WAIT=960  # 4 小时 (960 × 15s)
 ITER=0
-while [ $ITER -lt $MAX_WAIT ]; do
+while true; do
     ITER=$((ITER + 1))
     KAFA_OUT=$(ssh "$MID_HOST" "export JAVA_HOME=/root/jdk1.8.0_171 && \
         /root/kafka/bin/kafka-consumer-groups.sh \
@@ -50,7 +49,7 @@ while [ $ITER -lt $MAX_WAIT ]; do
     [ -z "$LAG" ] && LAG=-1
     [ -z "$TOTAL" ] && TOTAL=1
     PCT=$(( ($TOTAL - $LAG) * 100 / $TOTAL ))
-    echo "  [$ITER/$MAX_WAIT] 当前 lag: $LAG ($PCT%)"
+    echo "  [$ITER] 当前 lag: $LAG ($PCT%)"
 
     # 更新 Redis 系统状态
     redis-cli -a 1 -h "$MID_HOST" HSET stock:system:status consumer_lag "$LAG" consumer_pct "$PCT" 2>/dev/null
@@ -61,9 +60,6 @@ while [ $ITER -lt $MAX_WAIT ]; do
     fi
     sleep 15
 done
-if [ $ITER -ge $MAX_WAIT ] && [ "$LAG" -gt 0 ] 2>/dev/null; then
-    echo "[错误] 等待超时 ($MAX_WAIT 次), lag=$LAG, 仍继续..."
-fi
 
 # ---- 4. 停 consumer ----
 echo "[4/5] 停止 consumer (shutdown flush)..."

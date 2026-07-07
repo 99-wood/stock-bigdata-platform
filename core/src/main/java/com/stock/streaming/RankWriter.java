@@ -130,7 +130,13 @@ public final class RankWriter {
 
         int total = 0;
         try (Connection conn = JdbcUtil.getConnection();
+             PreparedStatement del = conn.prepareStatement(
+                     "DELETE FROM ads_stock_rank WHERE stat_time = ?");
              PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            // 先清除该时刻旧榜单，再写入新 Top 20
+            del.setString(1, statTime);
+            del.executeUpdate();
 
             total += writeRank(ps, "up",     upTop,     codeNames, statTime);
             total += writeRank(ps, "down",   downTop,   codeNames, statTime);
