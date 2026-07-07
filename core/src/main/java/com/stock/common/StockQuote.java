@@ -65,9 +65,11 @@ public class StockQuote implements Serializable {
     // ==================== 消费端计算字段 ====================
 
     /** 涨跌额（元）= price - prev_close */
+    @JsonProperty("change")
     private double changeAmt;
 
     /** 涨跌幅（%）= change_amt / prev_close × 100 */
+    @JsonProperty("change_pct")
     private double changePct;
 
     // ==================== 构造方法 ====================

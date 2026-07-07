@@ -6,8 +6,10 @@
 --
 -- KEYS[1] = stock:quote:ohlcv:{code}
 -- KEYS[2] = stock:market:summary
+-- KEYS[3] = stock:quote:ohlcv:codes (code 集合, 替代 KEYS)
 -- ARGV[1] = 新行情 JSON 字符串
 -- ARGV[2] = 统计时间 "yyyy-MM-dd HH:mm:ss"
+-- ARGV[3] = code
 --
 -- 日清逻辑不在此脚本 —— 由 Java 侧在 batch 开始前处理
 -- ============================================================
@@ -99,5 +101,8 @@ local sum   = redis.call('HGET', summary_key, '_sum_pct')
 if total and sum and tonumber(total) > 0 then
     redis.call('HSET', summary_key, 'avg_change_pct', tonumber(sum) / tonumber(total))
 end
+
+-- ⑥ 维护 code 集合 (替代 KEYS, 供 RankWriter 和 flushAllDaily 使用)
+redis.call('SADD', KEYS[3], ARGV[3])
 
 return 1
