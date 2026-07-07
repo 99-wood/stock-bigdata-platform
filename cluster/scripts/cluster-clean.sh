@@ -1,16 +1,22 @@
 #!/bin/bash
 # ============================================================
 # 集群数据归零脚本
-# 用法: bash cluster-clean.sh [--kafka]
-#       --kafka  同时重置 Kafka offset 为 0（不删数据，只回位）
+# 用法: bash cluster-clean.sh [--kafka] [--no-mysql]
+#       --kafka    同时重置 Kafka offset 为 0（不删数据，只回位）
+#       --no-mysql 跳过 MySQL truncate（daily-replay 专用）
 # 说明: 清空 Redis / MySQL / HDFS，可选重置 Kafka offset
 #       执行前请确保 consumer 和 data_gen 已停止
 # ============================================================
 
 RESET_KAFKA=false
-if [ "$1" = "--kafka" ]; then
-    RESET_KAFKA=true
-fi
+NO_MYSQL=false
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --kafka)   RESET_KAFKA=true ;;
+        --no-mysql) NO_MYSQL=true ;;
+    esac
+    shift
+done
 
 echo "=========================================="
 echo "  集群数据归零"
@@ -33,19 +39,24 @@ ssh mid 'redis-cli -a 1 FLUSHDB 2>/dev/null'
 echo "  ✓ Redis 已清空"
 
 # ---- 3. 清空 MySQL ----
-echo "  清空 MySQL..."
-ssh mid \
-    'mysql -ustock_admin -pstock2026 stock_ads -e "
-       TRUNCATE TABLE ads_market_summary;
-       TRUNCATE TABLE dws_stock_minute;
-       TRUNCATE TABLE dws_stock_day;
-     " 2>/dev/null
-     echo "  ✓ MySQL ads_market_summary / dws_stock_minute / dws_stock_day 已清空"'
+if [ "$NO_MYSQL" = true ]; then
+    echo "  跳过 MySQL (--no-mysql)"
+else
+    echo "  清空 MySQL..."
+    ssh mid \
+        'mysql -ustock_admin -pstock2026 stock_ads -e "
+           TRUNCATE TABLE ads_market_summary;
+           TRUNCATE TABLE dws_stock_minute;
+           TRUNCATE TABLE dws_stock_day;
+         " 2>/dev/null
+         echo "  ✓ MySQL ads_market_summary / dws_stock_minute / dws_stock_day 已清空"'
+fi
 
 # ---- 4. 清空 HDFS ----
 echo "  清空 HDFS..."
 source /etc/profile
-hdfs dfs -rm -r -f /stock/checkpoint /stock/ods /stock/dwd /stock/dws 2>/dev/null
+hdfs dfsadmin -safemode wait 2>/dev/null  # 等 NameNode 退出安全模式
+hdfs dfs -rm -r -f /stock/checkpoint /stock/ods /stock/dwd /stock/dws
 echo "  ✓ HDFS /stock/* 已清空"
 
 # ---- 5. Kafka offset 归零 (可选) ----
