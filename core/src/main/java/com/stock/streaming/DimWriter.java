@@ -1,6 +1,7 @@
 package com.stock.streaming;
 
 import com.stock.common.Config;
+import com.stock.common.JdbcUtil;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -32,15 +33,9 @@ public final class DimWriter {
     /** 缓存刷新间隔（毫秒） */
     private static final long REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
-    private DimWriter() {
-    }
+    // JDBC 驱动由 JdbcUtil 统一加载
 
-    static {
-        try {
-            Class.forName("com.mysql.jdbc.Driver");
-        } catch (ClassNotFoundException e) {
-            LOG.error("MySQL JDBC 驱动加载失败", e);
-        }
+    private DimWriter() {
     }
 
     public static void updateDimStock(SparkSession spark, Dataset<Row> quoteDF) {
@@ -68,7 +63,7 @@ public final class DimWriter {
             existingSet = getExistingCodes(spark, props);
         } catch (Exception e) {
             // JDBC 不可用时跳过维表更新（Redis 写入不受影响）
-            LOG.warn("读取 dim_stock 失败, 跳过维表更新: {}", e.getMessage());
+            LOG.warn("[DimWriter] 读取 dim_stock 失败, 跳过维表更新: {}", e.getMessage());
             return;
         }
 
@@ -78,7 +73,7 @@ public final class DimWriter {
                 .collect(Collectors.toList());
 
         if (newRows.isEmpty()) {
-            LOG.info("dim_stock 无新增股票代码");
+            LOG.info("[DimWriter] 无新增股票代码");
             return;
         }
 
@@ -89,7 +84,7 @@ public final class DimWriter {
                 .mode("append")
                 .jdbc(Config.mysqlUrl(), "dim_stock", props);
 
-        LOG.info("dim_stock 维表更新完成, 新增 {} 条", newCount);
+        LOG.info("[DimWriter] 维表更新完成: 新增 {} 条", newCount);
 
         // 新增的 code 加入本地缓存，避免广播重建
         newRows.stream().map(r -> r.getString(0)).forEach(existingSet::add);
@@ -108,7 +103,7 @@ public final class DimWriter {
         }
 
         // 全量刷新
-        LOG.info("刷新 dim_stock 广播缓存...");
+        LOG.info("[DimWriter] 刷新广播缓存...");
         Set<String> codes;
         try {
             codes = spark.read()
@@ -118,7 +113,7 @@ public final class DimWriter {
                     .map(r -> r.getString(0))
                     .collect(Collectors.toCollection(HashSet::new));
         } catch (Exception e) {
-            LOG.error("读取 dim_stock 失败, 使用空缓存", e);
+            LOG.error("[DimWriter] 读取 dim_stock 失败, 使用空缓存", e);
             codes = new HashSet<>();
         }
 
@@ -128,7 +123,7 @@ public final class DimWriter {
         }
         cachedCodes = JavaSparkContext.fromSparkContext(spark.sparkContext()).broadcast(codes);
         lastRefreshTime = now;
-        LOG.info("dim_stock 广播缓存刷新完成, {} 条", codes.size());
+        LOG.info("[DimWriter] 广播缓存刷新完成: {} 条", codes.size());
         return codes;
     }
 }
