@@ -61,8 +61,7 @@ nohup spark-submit \
     --total-executor-cores 6 \
     --driver-class-path "$MYSQL_JAR" \
     --jars "$MYSQL_JAR" \
-    --conf spark.streaming.backpressure.enabled=true \
-    --conf spark.streaming.kafka.maxRatePerPartition=10000 \
+    --conf spark.streaming.kafka.maxRatePerPartition=2000 \
     "$JAR_FILE" \
     $REPLAY \
     >> /tmp/consumer.log 2>&1 &
