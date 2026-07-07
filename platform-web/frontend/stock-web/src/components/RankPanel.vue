@@ -5,142 +5,189 @@
       <span class="panel-count">{{ data.length }}</span>
     </div>
     <div class="panel-body">
-      <div
-        v-for="(item, idx) in data" :key="item.code"
-        class="row group" @click="$emit('select', item.code)"
-      >
-        <span class="rank-badge" :class="rankBadge(idx)">{{ idx + 1 }}</span>
-        <div class="stock-main">
-          <span class="stock-code" :class="codeColor(item)">{{ item.code }}</span>
+      <div class="rank-cols">
+        <div class="rank-col">
+          <TransitionGroup name="rank" tag="div">
+            <div v-for="(item, idx) in leftCol" :key="item.code" class="row group" @click="$emit('select', item.code)">
+              <span class="rank-badge" :class="rankBadge(idx)">{{ idx + 1 }}</span>
+              <div class="stock-main">
+                <span class="stock-name" v-if="item.name" :class="codeColor(item)">{{ item.name }}</span>
+                <span class="stock-code" :class="codeColor(item)">{{ item.code }}</span>
+              </div>
+              <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 72 20" :stroke="sparkColor(sparkData[item.code])">
+                <path :d="sparkPath(sparkData[item.code])" fill="none" stroke-width="1.2" />
+              </svg>
+              <div class="stock-sides">
+                <span class="ask">{{ side(item, 'ask') }}</span>
+                <span class="bid">{{ side(item, 'bid') }}</span>
+              </div>
+            </div>
+          </TransitionGroup>
         </div>
-        <div class="stock-sides">
-          <span class="bid">{{ side(item, 'bid') }}</span>
-          <span class="ask">{{ side(item, 'ask') }}</span>
+        <div class="rank-col">
+          <TransitionGroup name="rank" tag="div">
+            <div v-for="(item, idx) in rightCol" :key="item.code" class="row group" @click="$emit('select', item.code)">
+              <span class="rank-badge" :class="rankBadge(idx + 10)">{{ idx + 11 }}</span>
+              <div class="stock-main">
+                <span class="stock-name" v-if="item.name" :class="codeColor(item)">{{ item.name }}</span>
+                <span class="stock-code" :class="codeColor(item)">{{ item.code }}</span>
+              </div>
+              <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 72 20" :stroke="sparkColor(sparkData[item.code])">
+                <path :d="sparkPath(sparkData[item.code])" fill="none" stroke-width="1.2" />
+              </svg>
+              <div class="stock-sides">
+                <span class="ask">{{ side(item, 'ask') }}</span>
+                <span class="bid">{{ side(item, 'bid') }}</span>
+              </div>
+            </div>
+          </TransitionGroup>
         </div>
-        <span class="row-action opacity-0 group-hover:opacity-100">
-          <el-icon><ArrowRight /></el-icon>
-        </span>
       </div>
-      <div v-if="!data.length" class="empty">
-        <span class="empty-dot"></span>
-        <span>暂无数据</span>
-      </div>
+      <div v-if="!data.length" class="empty">暂无数据</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ref, watch, computed } from 'vue'
 import { getStockColorClass } from '@/utils/stockColor'
+import { stockApi } from '@/api/request'
 
 const props = defineProps({
-  title: String, data: Array, type: String,
+  title: { type: String, default: '' },
+  data: { type: Array, default: () => [] },
+  type: { type: String, default: 'up' },
   plain: { type: Boolean, default: false }
 })
+
 defineEmits(['select'])
 
-function rankBadge(i) {
-  if (i === 0) return 'r1'
-  if (i === 1) return 'r2'
-  if (i === 2) return 'r3'
+function rankBadge(idx) {
+  if (idx === 0) return 'r1'
+  if (idx === 1) return 'r2'
+  if (idx === 2) return 'r3'
   return ''
 }
 
-function codeColor(item) {
-  if (item.changePct != null) return getStockColorClass(item)
-  if (props.type === 'up') return 'code-up'
-  if (props.type === 'down') return 'code-down'
-  return 'code-neutral'
+function codeColor(item) { return getStockColorClass(item) }
+
+const leftCol = computed(() => props.data.slice(0, 10))
+const rightCol = computed(() => props.data.slice(10, 20))
+
+function side(item, which) {
+  const v = which === 'bid' ? Number(item.bid) : Number(item.ask)
+  return v != null ? v.toFixed(2) : '--'
 }
 
-function side(item, s) {
-  const b = Number(item.bid), a = Number(item.ask)
-  if (s === 'bid') {
-    if (b > 0) return b.toFixed(2)
-    if (a > 0 && b === 0) return '跌停'
-    return '停牌'
-  }
-  if (a > 0) return a.toFixed(2)
-  if (b > 0 && a === 0) return '涨停'
-  return '停牌'
+// ---- Sparkline ----
+const sparkData = ref({}) // { code: [close, close, ...] }
+let sparkTimer = null
+
+watch(() => props.data, (list) => {
+  clearTimeout(sparkTimer)
+  sparkTimer = setTimeout(async () => {
+    const codes = list.map(i => i.code).filter(Boolean)
+    if (!codes.length) return
+    try { sparkData.value = await stockApi.getSparkBatch(codes) || {} } catch {}
+  }, 300)
+}, { immediate: true, deep: false })
+
+function sparkPath(closes) {
+  if (!closes || closes.length < 2) return ''
+  const w = 72, h = 20, pad = 2
+  const min = Math.min(...closes), max = Math.max(...closes)
+  const range = max - min || 1
+  const xStep = (w - pad * 2) / (closes.length - 1)
+  return closes.map((v, i) => {
+    const x = pad + i * xStep
+    const y = pad + (1 - (v - min) / range) * (h - pad * 2)
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
+
+function sparkColor(closes) {
+  if (!closes || closes.length < 2) return 'var(--text-muted)'
+  return closes[closes.length - 1] >= closes[0] ? 'var(--stock-up)' : 'var(--stock-down)'
 }
 </script>
 
 <style scoped>
 .panel {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  transition: border-color .2s;
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: 0; overflow: hidden;
+  height: 100%; display: flex; flex-direction: column;
 }
-.panel.plain {
-  background: none;
-  border: none;
-  border-radius: 0;
-}
-.panel:hover { border-color: var(--border-strong) }
-.panel.plain:hover { border-color: transparent }
+.panel.plain { background: transparent; border: none; border-radius: 0; height: 100%; display: flex; flex-direction: column; }
 
 .panel-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-subtle);
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--border-subtle);
+  background: var(--accent-bg);
 }
+.panel-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 }
+.panel-count { font-size: 11px; color: var(--text-muted); background: var(--bg-elevated); padding: 2px 8px; border-radius: var(--radius-sm) }
 
-.panel-title { font-size: 13px; font-weight: 600; color: var(--text-primary); letter-spacing: -.01em }
-.panel-count {
-  font-size: 10px; font-weight: 600; color: var(--text-muted);
-  background: var(--bg-elevated); padding: 2px 8px;
-  border-radius: var(--radius-full); font-family: var(--font-mono);
-}
+.panel-body { flex: 1; overflow: hidden; display: flex; flex-direction: column }
+.rank-cols { display: flex; gap: 0; flex: 1; min-height: 0 }
+.rank-col { flex: 1; min-width: 0; display: flex; flex-direction: column }
+.rank-col > div { flex: 1; display: flex; flex-direction: column }
+.rank-col > div > .row { flex: 1 }
+.rank-col + .rank-col { border-left: 1px solid rgba(45,51,64,0.3) }
 
-.panel-body { max-height: 460px; overflow-y: auto }
-
+/* ---- Row ---- */
 .row {
-  display: flex; align-items: center;
-  padding: 8px 16px;
-  border-bottom: 1px solid rgba(255,255,255,.025);
+  display: flex; align-items: center; padding: 8px 14px; gap: 8px;
   cursor: pointer; transition: background .1s;
+  border-bottom: 1px solid rgba(45,51,64,0.3);
 }
-.row:last-child { border-bottom: none }
 .row:hover { background: var(--bg-hover) }
+.row:last-child { border-bottom: none; margin-bottom: 0 }
 
 .rank-badge {
-  width: 24px; height: 24px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-sm);
-  font-size: 11px; font-weight: 700;
-  color: var(--text-muted); background: var(--bg-elevated);
-  font-family: var(--font-mono); flex-shrink: 0; margin-right: 12px;
+  width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); font-size: 11px; font-weight: 600;
+  color: var(--text-muted); background: var(--bg-elevated); flex-shrink: 0;
 }
 .rank-badge.r1 { background: var(--stock-up); color: #fff }
-.rank-badge.r2 { background: #E17341; color: #fff }
+.rank-badge.r2 { background: #e17341; color: #fff }
 .rank-badge.r3 { background: var(--stock-warn); color: #1A1A1A }
 
-.stock-main { flex: 1; overflow: hidden }
-
+.stock-main { flex: 1; overflow: hidden; line-height: 1.3 }
+.stock-name {
+  display: block;
+  font-size: 12px; font-weight: 500; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .stock-code {
-  font-size: 13px; font-family: var(--font-mono); font-weight: 500;
-  letter-spacing: .02em;
+  font-size: 11px; font-family: var(--font-mono); font-weight: 400;
+  letter-spacing: .02em; color: var(--text-muted);
 }
 
 .stock-sides {
-  display: flex; flex-direction: column; align-items: flex-end;
-  gap: 1px; flex-shrink: 0; font-size: 11px; font-family: var(--font-mono);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+  font-size: 11px; font-family: var(--font-mono); flex-shrink: 0;
 }
 .bid { color: var(--stock-down) }
 .ask { color: var(--stock-up) }
 
-.row-action {
-  margin-left: 8px; color: var(--text-muted); font-size: 13px;
-  transition: opacity .15s; flex-shrink: 0;
+.spark-svg {
+  width: 56px; height: 18px; flex-shrink: 0;
+  margin: 0 2px; opacity: 0.8;
 }
-.opacity-0 { opacity: 0 }
+.empty { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px }
 
-.empty {
-  display: flex; align-items: center; justify-content: center;
-  gap: 8px; padding: 44px 16px; color: var(--text-muted); font-size: 13px;
+/* ---- FLIP Transition ---- */
+.rank-move,
+.rank-enter-active,
+.rank-leave-active {
+  transition: all 0.5s ease;
 }
-.empty-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--border-default) }
+.rank-enter-from,
+.rank-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+.rank-leave-active {
+  position: absolute;
+}
 </style>

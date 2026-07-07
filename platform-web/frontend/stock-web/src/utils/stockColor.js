@@ -23,8 +23,8 @@ export function getStockDirection(stock) {
   // 2. 退市
   if (stock.status === '-2') return 'delisted'
 
-  // 3. changePct 驱动（主要来源）
-  const pct = Number(stock.changePct)
+  // 3. changePct 驱动（兼容 snake_case 和 camelCase）
+  const pct = Number(stock.change_pct ?? stock.changePct)
   if (!isNaN(pct)) {
     if (pct > 0) return 'up'
     if (pct < 0) return 'down'

@@ -13,8 +13,7 @@ public class StockLatestDTO {
     // 从 Redis Key 中提取的股票代码
     private String code;
 
-    // 从 MySQL dim_stock 补全的股票名称
-    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    // 股票名称 → 来自 stock:quote:ohlcv:{code} JSON 中的 name 字段
     private String name;
 
     // ---- v1 Level-2 五档 ----

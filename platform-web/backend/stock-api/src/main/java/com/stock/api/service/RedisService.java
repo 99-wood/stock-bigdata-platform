@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stock.api.model.dto.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.Cursor;
-import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
@@ -36,7 +34,11 @@ public class RedisService {
     private static final String KEY_RANK_AMOUNT = "stock:rank:amount";
     private static final String KEY_RANK_QUANT = "stock:rank:quant";
     private static final String KEY_ALERT_LATEST = "stock:alert:latest";
-    private static final String KEY_STOCK_LATEST_PREFIX = "stock:quote:";
+    private static final String KEY_QUOTE_PREFIX = "stock:quote:";
+    private static final String KEY_OHLCV_CODES = "stock:quote:ohlcv:codes";
+    private static final String KEY_OHLCV_PREFIX = "stock:quote:ohlcv:";
+    private static final String KEY_MINUTE_WINDOWS = "stock:minute:windows";
+    private static final String KEY_MINUTE_PREFIX = "stock:minute:";
 
     /**
      * Get market summary from Redis hash.
@@ -82,30 +84,71 @@ public class RedisService {
     }
 
     /**
-     * Get latest stock data for a single stock code.
+     * Get stock detail: OHLCV (primary) + Level-2 depth (merged).
+     * OHLCV JSON 自带 name，无需再从 MySQL 查询。
      */
     public StockLatestDTO getStockLatest(String code) {
         try {
-            String json = stringRedisTemplate.opsForValue().get(KEY_STOCK_LATEST_PREFIX + code);
-            if (json == null || json.isEmpty()) {
-                log.warn("Stock latest data not found for code: {}", code);
-                return null;
+            // 1. Read OHLCV JSON (primary: has name, price, open, high, low, volume, amount, change, change_pct)
+            String ohlcvJson = stringRedisTemplate.opsForValue().get(KEY_OHLCV_PREFIX + code);
+            StockLatestDTO dto;
+            if (ohlcvJson != null && !ohlcvJson.isEmpty()) {
+                dto = objectMapper.readValue(ohlcvJson, StockLatestDTO.class);
+            } else {
+                log.warn("OHLCV data not found for code: {}, trying Level-2 fallback", code);
+                dto = new StockLatestDTO();
             }
-            StockLatestDTO dto = objectMapper.readValue(json, StockLatestDTO.class);
-            dto.setCode(code);  // code 不在 JSON 内，从 Key 提取
-            // 从 MySQL dim_stock 补全名称 (mysql profile 未激活时跳过)
-            if (stockNameService != null) {
-                String name = stockNameService.getName(code);
-                if (name != null) dto.setName(name);
+            dto.setCode(code);
+
+            // 2. Merge Level-2 depth (bid/ask/五档/status) from stock:quote:{code}
+            String l2Json = stringRedisTemplate.opsForValue().get(KEY_QUOTE_PREFIX + code);
+            if (l2Json != null && !l2Json.isEmpty()) {
+                StockLatestDTO l2 = objectMapper.readValue(l2Json, StockLatestDTO.class);
+                mergeLevel2(dto, l2);
             }
+
+            // 3. MySQL name fallback (if OHLCV didn't have name)
+            if (dto.getName() == null && stockNameService != null) {
+                dto.setName(stockNameService.getName(code));
+            }
+
             return dto;
         } catch (JsonProcessingException e) {
-            log.error("Failed to deserialize stock latest JSON for code: {}", code, e);
+            log.error("Failed to deserialize stock JSON for code: {}", code, e);
             return null;
         } catch (Exception e) {
             log.error("Failed to get stock latest for code: {}", code, e);
             return null;
         }
+    }
+
+    /** Merge Level-2 fields into the DTO (non-null overwrite) */
+    private void mergeLevel2(StockLatestDTO target, StockLatestDTO source) {
+        if (source.getBid() != null) target.setBid(source.getBid());
+        if (source.getAsk() != null) target.setAsk(source.getAsk());
+        if (source.getB1v() != null) target.setB1v(source.getB1v());
+        if (source.getB1p() != null) target.setB1p(source.getB1p());
+        if (source.getB2v() != null) target.setB2v(source.getB2v());
+        if (source.getB2p() != null) target.setB2p(source.getB2p());
+        if (source.getB3v() != null) target.setB3v(source.getB3v());
+        if (source.getB3p() != null) target.setB3p(source.getB3p());
+        if (source.getB4v() != null) target.setB4v(source.getB4v());
+        if (source.getB4p() != null) target.setB4p(source.getB4p());
+        if (source.getB5v() != null) target.setB5v(source.getB5v());
+        if (source.getB5p() != null) target.setB5p(source.getB5p());
+        if (source.getS1v() != null) target.setS1v(source.getS1v());
+        if (source.getS1p() != null) target.setS1p(source.getS1p());
+        if (source.getS2v() != null) target.setS2v(source.getS2v());
+        if (source.getS2p() != null) target.setS2p(source.getS2p());
+        if (source.getS3v() != null) target.setS3v(source.getS3v());
+        if (source.getS3p() != null) target.setS3p(source.getS3p());
+        if (source.getS4v() != null) target.setS4v(source.getS4v());
+        if (source.getS4p() != null) target.setS4p(source.getS4p());
+        if (source.getS5v() != null) target.setS5v(source.getS5v());
+        if (source.getS5p() != null) target.setS5p(source.getS5p());
+        if (source.getStatus() != null) target.setStatus(source.getStatus());
+        if (source.getTradeDate() != null && target.getTradeDate() == null) target.setTradeDate(source.getTradeDate());
+        if (source.getTradeTime() != null && target.getTradeTime() == null) target.setTradeTime(source.getTradeTime());
     }
 
     /**
@@ -219,37 +262,43 @@ public class RedisService {
             return Collections.emptyList();
         }
 
-        // MGET all stock latest JSONs
-        List<String> redisKeys = codes.stream()
-                .map(c -> KEY_STOCK_LATEST_PREFIX + c)
-                .collect(Collectors.toList());
-        List<String> jsonList = stringRedisTemplate.opsForValue().multiGet(redisKeys);
+        // MGET OHLCV + Level-2 in parallel
+        List<String> ohlcvKeys = codes.stream().map(c -> KEY_OHLCV_PREFIX + c).collect(Collectors.toList());
+        List<String> l2Keys = codes.stream().map(c -> KEY_QUOTE_PREFIX + c).collect(Collectors.toList());
+        List<String> ohlcvList = stringRedisTemplate.opsForValue().multiGet(ohlcvKeys);
+        List<String> l2List = stringRedisTemplate.opsForValue().multiGet(l2Keys);
 
-        if (jsonList == null) {
-            return Collections.emptyList();
-        }
+        if (ohlcvList == null) return Collections.emptyList();
 
-        // Zip codes, scores, and JSONs together
+        // Zip codes, scores, OHLCV + Level-2 together
         List<RankItemDTO> result = new ArrayList<>();
         for (int i = 0; i < codes.size(); i++) {
-            String json = (i < jsonList.size()) ? jsonList.get(i) : null;
-            if (json == null || json.isEmpty()) {
-                log.warn("Skipping rank item with missing stock data for code: {}", codes.get(i));
+            String ohlcvJson = (i < ohlcvList.size()) ? ohlcvList.get(i) : null;
+            if (ohlcvJson == null || ohlcvJson.isEmpty()) {
+                log.warn("Skipping rank item: no OHLCV for {}", codes.get(i));
                 continue;
             }
             try {
-                StockLatestDTO stock = objectMapper.readValue(json, StockLatestDTO.class);
+                StockLatestDTO stock = objectMapper.readValue(ohlcvJson, StockLatestDTO.class);
+                // Merge Level-2 bid/ask/status
+                String l2Json = (l2List != null && i < l2List.size()) ? l2List.get(i) : null;
+                Double bid = null, ask = null;
+                String status = null;
+                if (l2Json != null && !l2Json.isEmpty()) {
+                    StockLatestDTO l2 = objectMapper.readValue(l2Json, StockLatestDTO.class);
+                    bid = l2.getBid(); ask = l2.getAsk(); status = l2.getStatus();
+                }
                 RankItemDTO item = RankItemDTO.builder()
                         .code(codes.get(i))
                         .name(stock.getName())
                         .price(stock.getPrice())
-                        .bid(stock.getBid())
-                        .ask(stock.getAsk())
+                        .bid(bid)
+                        .ask(ask)
                         .tradeDate(stock.getTradeDate())
                         .tradeTime(stock.getTradeTime())
                         .score(scores.get(i))
                         .changePct(stock.getChangePct())
-                        .status(stock.getStatus())
+                        .status(status)
                         .build();
                 result.add(item);
             } catch (JsonProcessingException e) {
@@ -260,42 +309,30 @@ public class RedisService {
     }
 
     /**
-     * Get all available stock codes with basic info.
-     * Uses SCAN to iterate stock:quote:* keys, then MGET to fetch in batches.
+     * Get all stocks via SMEMBERS stock:quote:ohlcv:codes + batch GET OHLCV JSON.
+     * OHLCV JSON 自带 name，无需 SCAN 或 MySQL 慢查询。
      */
     public List<StockLatestDTO> getAllStocks() {
         try {
-            // --- Step 1: SCAN for all stock:quote:* keys ---
-            List<String> codes = new ArrayList<>();
-            ScanOptions options = ScanOptions.scanOptions()
-                    .match(KEY_STOCK_LATEST_PREFIX + "*")
-                    .count(100)
-                    .build();
-            try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
-                while (cursor.hasNext()) {
-                    String key = cursor.next();
-                    String code = key.substring(KEY_STOCK_LATEST_PREFIX.length());
-                    codes.add(code);
-                }
-            }
-            log.info("SCAN stock:quote:* found {} codes: first 5 = {}",
-                    codes.size(), codes.stream().limit(5).collect(Collectors.toList()));
-
-            if (codes.isEmpty()) {
-                log.warn("SCAN stock:quote:* returned no keys");
+            // --- Step 1: SMEMBERS stock:quote:ohlcv:codes (替代 SCAN，无阻塞) ---
+            Set<String> codes = stringRedisTemplate.opsForSet().members(KEY_OHLCV_CODES);
+            if (codes == null || codes.isEmpty()) {
+                log.warn("stock:quote:ohlcv:codes is empty");
                 return Collections.emptyList();
             }
+            List<String> codeList = new ArrayList<>(codes);
+            log.info("SMEMBERS ohlcv:codes found {} codes, first 5 = {}",
+                    codeList.size(), codeList.stream().limit(5).collect(Collectors.toList()));
 
-            // --- Step 2: MGET in batches ---
+            // --- Step 2: Batch GET stock:quote:ohlcv:{code} ---
             List<StockLatestDTO> stocks = new ArrayList<>();
             int successCount = 0, nullCount = 0, parseFailCount = 0;
-            String firstRawJson = null;
 
-            for (int i = 0; i < codes.size(); i += 100) {
-                int end = Math.min(i + 100, codes.size());
-                List<String> batchCodes = codes.subList(i, end);
+            for (int i = 0; i < codeList.size(); i += 100) {
+                int end = Math.min(i + 100, codeList.size());
+                List<String> batchCodes = codeList.subList(i, end);
                 List<String> keys = batchCodes.stream()
-                        .map(c -> KEY_STOCK_LATEST_PREFIX + c)
+                        .map(c -> KEY_OHLCV_PREFIX + c)
                         .collect(Collectors.toList());
                 List<String> jsonList = stringRedisTemplate.opsForValue().multiGet(keys);
 
@@ -303,48 +340,40 @@ public class RedisService {
                     log.warn("MGET returned null for batch {}", i / 100);
                     continue;
                 }
-
                 for (int j = 0; j < jsonList.size(); j++) {
                     String json = jsonList.get(j);
                     if (json == null || json.isEmpty()) {
                         nullCount++;
-                        log.debug("MGET returned null/empty for key: stock:quote:{}", batchCodes.get(j));
                         continue;
-                    }
-                    if (firstRawJson == null) {
-                        firstRawJson = json;
                     }
                     try {
                         StockLatestDTO dto = objectMapper.readValue(json, StockLatestDTO.class);
-                        dto.setCode(batchCodes.get(j));  // code 从 Key 提取，不在 JSON 内
+                        dto.setCode(batchCodes.get(j));
                         stocks.add(dto);
                         successCount++;
                     } catch (JsonProcessingException e) {
                         parseFailCount++;
                         if (parseFailCount <= 3) {
-                            log.error("JSON parse FAILED for code={}, raw={}",
-                                    batchCodes.get(j),
-                                    json.length() > 300 ? json.substring(0, 300) : json);
+                            log.error("JSON parse FAILED for code={}", batchCodes.get(j));
                         }
                     }
                 }
             }
 
-            log.info("getAllStocks result: scanned={}, success={}, nullVal={}, parseFail={}. First DTO code={}, tradeDate={}, bid={}",
-                    codes.size(), successCount, nullCount, parseFailCount,
+            log.info("getAllStocks: total={}, success={}, nullVal={}, parseFail={}. First: code={}, name={}, price={}",
+                    codeList.size(), successCount, nullCount, parseFailCount,
                     stocks.isEmpty() ? "N/A" : stocks.get(0).getCode(),
-                    stocks.isEmpty() ? "N/A" : stocks.get(0).getTradeDate(),
-                    stocks.isEmpty() ? "N/A" : stocks.get(0).getBid());
+                    stocks.isEmpty() ? "N/A" : stocks.get(0).getName(),
+                    stocks.isEmpty() ? "N/A" : stocks.get(0).getPrice());
 
-            // Enrich with stock names from MySQL dim_stock (mysql profile 未激活时跳过)
+            // MySQL name fallback (OHLCV 通常已有 name，此为兜底)
             if (stockNameService != null) {
                 for (StockLatestDTO dto : stocks) {
-                    if (dto.getCode() != null) {
+                    if (dto.getName() == null && dto.getCode() != null) {
                         String name = stockNameService.getName(dto.getCode());
                         if (name != null) dto.setName(name);
                     }
                 }
-                log.info("Name enrichment done, cache entries: {}", stockNameService.getCacheSize());
             }
 
             return stocks;
@@ -373,26 +402,178 @@ public class RedisService {
                 .collect(Collectors.toList());
     }
 
+    /** 内存缓存：全量 spark 数据 + 缓存时间戳，30s 过期 */
+    private volatile Map<String, List<Double>> sparkCache;
+    private volatile long sparkCacheTime;
+
+    /** Batch sparkline: hit in-memory cache (30s TTL), compute on miss. */
+    public Map<String, List<Double>> getSparkBatch(List<String> codes) {
+        // 1. 命中缓存：直接返回
+        Map<String, List<Double>> cached = sparkCache;
+        if (cached != null && System.currentTimeMillis() - sparkCacheTime < 30_000) {
+            Map<String, List<Double>> result = new LinkedHashMap<>();
+            for (String code : codes) {
+                List<Double> v = cached.get(code);
+                if (v != null) result.put(code, v);
+            }
+            return result;
+        }
+
+        // 2. 缓存未命中：从 minute hashes 重建
+        Map<String, List<Double>> fresh = computeSparkFromMinutes();
+        sparkCache = fresh;
+        sparkCacheTime = System.currentTimeMillis();
+
+        Map<String, List<Double>> result = new LinkedHashMap<>();
+        for (String code : codes) {
+            List<Double> v = fresh.get(code);
+            if (v != null) result.put(code, v);
+        }
+        return result;
+    }
+
+    private Map<String, List<Double>> computeSparkFromMinutes() {
+        Map<String, List<Double>> spark = new LinkedHashMap<>();
+        try {
+            Set<String> windows = stringRedisTemplate.opsForSet().members(KEY_MINUTE_WINDOWS);
+            if (windows == null || windows.isEmpty()) return spark;
+            String latestDate = windows.stream()
+                    .map(w -> w.substring(0, 10)).max(Comparator.naturalOrder()).orElse(null);
+            if (latestDate == null) return spark;
+            List<String> sortedWindows = windows.stream()
+                    .filter(w -> w.startsWith(latestDate)).sorted().collect(Collectors.toList());
+            if (sortedWindows.isEmpty()) return spark;
+
+            Set<String> allCodes = stringRedisTemplate.opsForSet().members(KEY_OHLCV_CODES);
+            if (allCodes == null || allCodes.isEmpty()) return spark;
+
+            List<String> codeOrder = new ArrayList<>();
+            List<Object> pipeResults = stringRedisTemplate.executePipelined(
+                new org.springframework.data.redis.core.SessionCallback<Object>() {
+                    public <K, V> Object execute(org.springframework.data.redis.core.RedisOperations<K, V> ops) {
+                        for (String code : allCodes) {
+                            for (String w : sortedWindows) {
+                                ops.opsForHash().get((K) (KEY_MINUTE_PREFIX + code + ":" + w), "close");
+                                codeOrder.add(code);
+                            }
+                        }
+                        return null;
+                    }
+                });
+
+            for (int i = 0; i < codeOrder.size() && i < pipeResults.size(); i++) {
+                Object v = pipeResults.get(i);
+                if (v != null) {
+                    spark.computeIfAbsent(codeOrder.get(i), k -> new ArrayList<>())
+                         .add(Double.parseDouble(v.toString()));
+                }
+            }
+            log.info("Spark cache rebuilt: {} stocks × {} windows = {} results",
+                    allCodes.size(), sortedWindows.size(), spark.size());
+        } catch (Exception e) {
+            log.warn("Spark compute failed: {}", e.getMessage());
+        }
+        return spark;
+    }
+
     /**
-     * Get latest trade time by scanning any stock:quote:* key via SCAN.
+     * Get today's minute K-line for a stock.
+     * Steps: SMEMBERS windows → filter today → sort → HGETALL each → delta volume.
+     */
+    public List<Map<String, Object>> getStockMinutes(String code, String date) {
+        try {
+            // 1. Get all windows, optionally filter by date, sort ascending
+            Set<String> allWindows = stringRedisTemplate.opsForSet().members(KEY_MINUTE_WINDOWS);
+            if (allWindows == null || allWindows.isEmpty()) {
+                log.warn("No minute windows found in Redis");
+                return Collections.emptyList();
+            }
+
+            List<String> windows;
+            if (date != null && !date.isEmpty()) {
+                windows = allWindows.stream()
+                        .filter(w -> w.startsWith(date))
+                        .sorted()
+                        .collect(Collectors.toList());
+            } else {
+                windows = allWindows.stream().sorted().collect(Collectors.toList());
+            }
+
+            log.info("Minute windows: date={}, total={}, filtered={}, first 5 windows: {}",
+                    date, allWindows.size(), windows.size(),
+                    allWindows.stream().limit(5).collect(Collectors.toList()));
+
+            if (windows.isEmpty()) return Collections.emptyList();
+
+            // 2. Pipeline HGETALL using opsForHash for correct deserialization
+            List<Object> rawResults = stringRedisTemplate.executePipelined(
+                    new org.springframework.data.redis.core.SessionCallback<Object>() {
+                        @Override
+                        public <K, V> Object execute(org.springframework.data.redis.core.RedisOperations<K, V> ops) {
+                            for (String w : windows) {
+                                String key = KEY_MINUTE_PREFIX + code + ":" + w;
+                                ops.opsForHash().entries((K) key);
+                            }
+                            return null;
+                        }
+                    });
+
+            // 3. Parse results, compute delta volume
+            List<Map<String, Object>> result = new ArrayList<>();
+            long prevLastVol = -1;
+
+            for (int i = 0; i < windows.size(); i++) {
+                Object raw = rawResults.get(i);
+                if (!(raw instanceof Map)) continue;
+
+                @SuppressWarnings("unchecked")
+                Map<Object, Object> rawMap = (Map<Object, Object>) raw;
+                if (rawMap.isEmpty()) continue;
+
+                Map<String, String> fields = new HashMap<>();
+                for (Map.Entry<Object, Object> e : rawMap.entrySet()) {
+                    fields.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+                }
+
+                String time = windows.get(i).substring(11); // "HH:mm:00"
+                double open = Double.parseDouble(fields.getOrDefault("open", "0"));
+                double high = Double.parseDouble(fields.getOrDefault("high", "0"));
+                double low = Double.parseDouble(fields.getOrDefault("low", "0"));
+                double close = Double.parseDouble(fields.getOrDefault("close", "0"));
+                long lastVol = Long.parseLong(fields.getOrDefault("last_vol", "0"));
+
+                long vol = (prevLastVol < 0) ? 0 : (lastVol - prevLastVol);
+                prevLastVol = lastVol;
+
+                Map<String, Object> candle = new LinkedHashMap<>();
+                candle.put("time", time);
+                candle.put("open", open);
+                candle.put("high", high);
+                candle.put("low", low);
+                candle.put("close", close);
+                candle.put("vol", Math.max(0, vol));
+                result.add(candle);
+            }
+
+            log.info("Stock minutes for code={}: windows={}, candles={}", code, windows.size(), result.size());
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to get stock minutes for code: {}", code, e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Get latest trade time by sampling one code from OHLCV Set.
      * Returns "yyyy-MM-dd HH:mm:ss" or null if no data available.
      */
     public String getLatestTradeTime() {
         try {
-            // SCAN instead of KEYS to avoid blocking Redis
-            ScanOptions options = ScanOptions.scanOptions()
-                    .match(KEY_STOCK_LATEST_PREFIX + "*")
-                    .count(1)
-                    .build();
-            String firstKey = null;
-            try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
-                if (cursor.hasNext()) {
-                    firstKey = cursor.next();
-                }
-            }
-            if (firstKey == null) return null;
+            // SRANDMEMBER: random sample from OHLCV codes, O(1) non-blocking
+            String code = stringRedisTemplate.opsForSet().randomMember(KEY_OHLCV_CODES);
+            if (code == null) return null;
 
-            String json = stringRedisTemplate.opsForValue().get(firstKey);
+            String json = stringRedisTemplate.opsForValue().get(KEY_OHLCV_PREFIX + code);
             if (json == null) return null;
             StockLatestDTO stock = objectMapper.readValue(json, StockLatestDTO.class);
             if (stock.getTradeDate() != null && stock.getTradeTime() != null) {

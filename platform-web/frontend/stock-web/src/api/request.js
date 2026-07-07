@@ -35,7 +35,9 @@ export const stockApi = {
   getTopDown: (count = 20) => request.get('/stocks/top-down', { params: { count } }),
   getTopAmount: (count = 20) => request.get('/stocks/top-amount', { params: { count } }),
   getTopQuant: (count = 20) => request.get('/stocks/top-quant', { params: { count } }),
-  getStockDetail: (code) => request.get(`/stocks/${code}`)
+  getStockDetail: (code) => request.get(`/stocks/${code}`),
+  getStockMinutes: (code, date) => request.get(`/stocks/${code}/minutes`, { params: { date } }),
+  getSparkBatch: (codes) => request.post('/stocks/spark-batch', codes)
 }
 
 // Alert API

@@ -48,19 +48,19 @@
     </header>
 
     <div class="dashboard-content">
-      <!-- ═══ Market Breadth (40% width) ═══ -->
-      <section class="kpi-strip">
-        <!-- left: combined breadth block -->
-        <div class="breadth-card">
+      <div class="content-left">
+        <!-- ═══ Market Breadth ═══ -->
+        <section class="kpi-strip">
+          <div class="breadth-card">
           <!-- header with inline stats -->
           <div class="breadth-header">
             <span class="breadth-title">大盘</span>
             <div class="bh-stats">
-              <span class="bhs-item"><em>{{ fmt(store.marketSummary.totalStocks) }}</em> 股</span>
+              <span class="bhs-item"><em>{{ fmt(store.marketSummary.totalStocks) }}</em><span class="bhs-unit">家</span></span>
               <span class="bhs-sep"></span>
-              <span class="bhs-item"><em>{{ fmt(store.marketSummary.totalVolume) }}</em> 手</span>
+              <span class="bhs-item"><em>{{ volInfo.value }}</em><span class="bhs-unit">{{ volInfo.unit }}</span></span>
               <span class="bhs-sep"></span>
-              <span class="bhs-item"><em>{{ fmt(store.marketSummary.totalAmount) }}</em> 万</span>
+              <span class="bhs-item"><em>{{ amtInfo.value }}</em><span class="bhs-unit">{{ amtInfo.unit }}</span></span>
             </div>
             <span class="breadth-time" v-if="store.marketSummary.statTime">
               {{ store.marketSummary.statTime }}
@@ -78,29 +78,28 @@
           <div class="breadth-metrics">
             <div class="bmetric up">
               <div class="bmetric-main">
-                <el-icon class="bmetric-icon"><CaretTop /></el-icon>
+                <span class="metric-arrow">▲</span>
                 <span class="bmetric-val">{{ fmt(store.marketSummary.upCount) }}</span>
               </div>
               <span class="bmetric-sub">上涨 {{ store.upRatio }}%</span>
             </div>
             <div class="bmetric down">
               <div class="bmetric-main">
-                <el-icon class="bmetric-icon"><CaretBottom /></el-icon>
+                <span class="metric-arrow">▼</span>
                 <span class="bmetric-val">{{ fmt(store.marketSummary.downCount) }}</span>
               </div>
               <span class="bmetric-sub">下跌 {{ store.downRatio }}%</span>
             </div>
             <div class="bmetric flat">
               <div class="bmetric-main">
-                <span class="flat-mark">—</span>
+                <span class="metric-arrow">—</span>
                 <span class="bmetric-val">{{ fmt(store.marketSummary.flatCount) }}</span>
               </div>
               <span class="bmetric-sub">平盘 {{ store.flatRatio }}%</span>
             </div>
             <div class="bmetric" :class="avgDirection">
               <div class="bmetric-main">
-                <span class="avg-mark" :class="avgDirection">{{ avgSign }}</span>
-                <span class="bmetric-val">{{ fmtPct(store.marketSummary.avgChangePct) }}</span>
+                <span class="bmetric-val" :class="avgDirection">{{ fmtPct(store.marketSummary.avgChangePct) }}</span>
               </div>
               <span class="bmetric-sub">平均涨跌幅</span>
             </div>
@@ -119,7 +118,6 @@
             @click="activeRank = tab.key"
           >
             <span class="tab-label">{{ tab.label }}</span>
-            <span class="tab-badge">{{ tab.data.length }}</span>
           </button>
         </div>
         <div class="rank-body">
@@ -132,6 +130,15 @@
           />
         </div>
       </section>
+      </div><!-- /content-left -->
+
+      <!-- ═══ Stock Detail Panel (right 60%) ═══ -->
+      <div class="content-right" v-if="selectedStock">
+        <button class="detail-close" @click="closeDetail" title="关闭">
+          <el-icon><Close /></el-icon>
+        </button>
+        <StockDetailPanel :stock="selectedStock" />
+      </div>
     </div>
 
     <!-- ═══ Glass Alert Ticker ═══ -->
@@ -143,17 +150,34 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, CaretTop, CaretBottom } from '@element-plus/icons-vue'
+import { Refresh, Close } from '@element-plus/icons-vue'
 import { useStockStore } from '@/stores/stock'
 import { connectWebSocket, disconnectWebSocket } from '@/api/websocket'
 import { stockApi } from '@/api/request'
 import RankPanel from '@/components/RankPanel.vue'
+import StockDetailPanel from '@/components/StockDetailPanel.vue'
 import AlertTicker from '@/components/AlertTicker.vue'
 
 const store = useStockStore()
 const router = useRouter()
 
 function fmt(n) { return n != null ? n.toLocaleString() : '--' }
+// 成交量: 股→手，自适应万手/亿手
+const volInfo = computed(() => {
+  const v = store.marketSummary.totalVolume
+  if (v == null) return { value: '--', unit: '' }
+  const hands = Number(v) / 100
+  if (hands >= 100000000) return { value: (hands / 100000000).toFixed(1), unit: '亿手' }
+  if (hands >= 10000) return { value: (hands / 10000).toFixed(1), unit: '万手' }
+  return { value: hands.toLocaleString(), unit: '手' }
+})
+// 成交额: 元→自适应万/亿
+const amtInfo = computed(() => {
+  const v = store.marketSummary.totalAmount
+  if (v == null) return { value: '--', unit: '' }
+  if (v >= 100000000) return { value: (v / 100000000).toFixed(1), unit: '亿' }
+  return { value: (v / 10000).toFixed(0), unit: '万' }
+})
 function fmtPct(v) {
   if (v == null) return '--'
   return (v > 0 ? '+' : '') + v.toFixed(2) + '%'
@@ -168,9 +192,9 @@ const avgDirection = computed(() => {
 
 const avgSign = computed(() => {
   const v = store.marketSummary.avgChangePct
-  if (v > 0) return '+'
-  if (v < 0) return '−'
-  return '±'
+  if (v > 0) return '▲'
+  if (v < 0) return '▼'
+  return '—'
 })
 
 const topQuant = computed(() => store.topAmount.slice(0, 10))
@@ -197,7 +221,24 @@ async function onSearch(kw) {
 }
 
 function onSearchSelect(code) { if (code) goStock(code) }
-function goStock(code) { router.push(`/stock/${code}`) }
+
+const selectedStock = ref(null)
+const detailLoading = ref(false)
+
+async function goStock(code) {
+  detailLoading.value = true
+  try {
+    selectedStock.value = await stockApi.getStockDetail(code)
+  } catch {
+    selectedStock.value = null
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+function closeDetail() {
+  selectedStock.value = null
+}
 
 async function refreshAll() {
   await store.fetchAll()
@@ -221,10 +262,11 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 
 <style scoped>
 .dashboard {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-root);
+  overflow: hidden;
 }
 
 /* ═══ Header ═══ */
@@ -232,7 +274,7 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
   position: sticky;
   top: 0;
   z-index: 50;
-  height: 56px;
+  height: 44px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border-subtle);
   backdrop-filter: blur(12px);
@@ -323,29 +365,67 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 .spin { animation: rot 1s linear infinite }
 @keyframes rot { to { transform: rotate(360deg) } }
 
-/* ═══ Content ═══ */
+/* ═══ Content — flex row: left 40% + right 60% ═══ */
 .dashboard-content {
   flex: 1;
-  max-width: 1600px;
   width: 100%;
-  margin: 0 auto;
-  padding: 24px 24px 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+  min-height: 0;
 }
 
-/* ═══ Market Breadth (40% width) ═══ */
+.content-left {
+  width: 30%;
+  flex-shrink: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.content-right {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px; height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all .15s;
+}
+.detail-close:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg) }
+
+/* ═══ Market Breadth ═══ */
 .kpi-strip {
   display: grid;
-  grid-template-columns: 2fr 3fr;
-  gap: 14px;
-  margin-bottom: 18px;
+  grid-template-columns: 1fr;
+  margin-bottom: 0;
 }
 
 /* --- breadth card --- */
 .breadth-card {
-  padding: 12px 20px 14px;
+  padding: 8px 0 10px 0;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   display: flex;
   flex-direction: column;
 }
@@ -353,6 +433,7 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 .breadth-header {
   display: flex;
   align-items: baseline;
+  padding-left: 12px;
   gap: 12px;
 }
 .breadth-title {
@@ -376,6 +457,7 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
   color: var(--text-secondary);
   white-space: nowrap;
 }
+.bhs-unit { font-size: 9px; color: var(--text-muted); margin-left: 1px }
 .bhs-item em {
   font-style: normal;
   font-family: var(--font-mono);
@@ -424,7 +506,8 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 .breadth-metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  gap: 0;
+  padding: 0 12px;
 }
 
 .bmetric {
@@ -433,8 +516,8 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
   align-items: center;
   text-align: center;
   padding: 3px 4px;
-  border-radius: var(--radius-sm);
-  background: rgba(255,255,255,0.02);
+  border-radius: 0;
+  background: transparent;
 }
 
 .bmetric-main {
@@ -444,31 +527,13 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
   gap: 3px;
 }
 
-.bmetric-icon {
-  font-size: 12px;
-  line-height: 1;
-  flex-shrink: 0;
+.metric-arrow {
+  font-size: 14px; font-weight: 700; line-height: 1; flex-shrink: 0;
 }
-.bmetric.up   .bmetric-icon { color: var(--stock-up) }
-.bmetric.down .bmetric-icon { color: var(--stock-down) }
-.bmetric.flat .bmetric-icon { color: var(--text-muted) }
-
-.flat-mark {
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.avg-mark {
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  flex-shrink: 0;
-}
-.avg-mark.up   { color: var(--stock-up) }
-.avg-mark.down { color: var(--stock-down) }
-.avg-mark:not(.up):not(.down) { color: var(--text-muted) }
+.bmetric.up   .metric-arrow { color: var(--stock-up) }
+.bmetric.down .metric-arrow { color: var(--stock-down) }
+.bmetric.flat .metric-arrow,
+.avgDirection:not(.up):not(.down) .metric-arrow { color: var(--text-muted) }
 
 .bmetric-val {
   font-size: 18px;
@@ -488,21 +553,22 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
   white-space: nowrap;
 }
 
-/* ═══ Tabbed Ranking Block (40% width) ═══ */
+/* ═══ Tabbed Ranking Block ═══ */
 .rank-block {
-  width: 40%;
+  flex: 1;
+  width: 100%;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   overflow: hidden;
-  margin-bottom: 18px;
+  margin-bottom: 0;
 }
 
 /* --- tab bar --- */
 .rank-tabs {
   display: flex;
   gap: 2px;
-  padding: 8px 10px;
+  padding: 0;
   background: rgba(255,255,255,0.02);
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -510,10 +576,10 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 .rank-tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 16px;
+  gap: 4px;
+  padding: 5px 12px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 0;
   background: transparent;
   color: var(--text-secondary);
   font-size: 13px;
@@ -559,8 +625,9 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 .sr-price { color: var(--accent); font-weight: 600; margin-left: auto }
 
 @media (max-width: 860px) {
-  .kpi-strip { grid-template-columns: 1fr }
-  .rank-block { width: 100% }
+  .dashboard-content { flex-direction: column }
+  .content-left { width: 100% }
+  .content-right { position: static; max-height: none; flex: none }
   .breadth-metrics { grid-template-columns: repeat(2, 1fr) }
   .rank-tabs { flex-wrap: wrap; gap: 4px }
   .rank-tab { padding: 5px 12px; font-size: 12px }

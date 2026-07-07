@@ -45,7 +45,7 @@ watch(() => route.params.code, c => { if (c) fetchStock(c) })
 
 <style scoped>
 .page {
-  max-width: 960px; margin: 0 auto; padding: 20px 24px 48px;
+  max-width: 1600px; margin: 0 auto; padding: 20px 24px 48px;
   min-height: 100vh; background: var(--bg-root);
 }
 

@@ -27,9 +27,15 @@
           @click="select(row)"
         >
           <span class="slr-idx">{{ offset + i }}</span>
-          <span class="slr-name">{{ row.name || row.code }}</span>
-          <span class="slr-bid">{{ fmtBA(row,'bid') }}</span>
+          <span class="slr-info">
+            <span class="slr-name" :class="getStockColorClass(row)">{{ row.name || row.code }}</span>
+            <span class="slr-code" v-if="row.name" :class="getStockColorClass(row)">{{ row.code }}</span>
+          </span>
+          <svg v-if="sparkData[row.code]" class="slr-spark" viewBox="0 0 72 20" :stroke="sparkColor(sparkData[row.code])">
+            <path :d="sparkPath(sparkData[row.code])" fill="none" stroke-width="1.2" />
+          </svg>
           <span class="slr-ask">{{ fmtBA(row,'ask') }}</span>
+          <span class="slr-bid">{{ fmtBA(row,'bid') }}</span>
           <span class="slr-spr">{{ spread(row) }}</span>
         </div>
       </div>
@@ -70,9 +76,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { stockApi } from '@/api/request'
+import { getStockColorClass } from '@/utils/stockColor'
 import StockDetailPanel from '@/components/StockDetailPanel.vue'
 
 const all = ref([]); const loading = ref(true)
@@ -89,9 +96,9 @@ const paged = computed(() => filtered.value.slice((page.value-1)*pageSize, page.
 const offset = computed(() => (page.value-1)*pageSize+1)
 
 function fmtBA(r, side) {
-  const b=Number(r.bid), a=Number(r.ask)
-  if (side==='bid') { if(b>0)return b.toFixed(2); if(a>0)return'跌停'; return'停牌' }
-  if (a>0)return a.toFixed(2); if(b>0)return'涨停'; return'停牌'
+  const raw = side==='bid' ? r.bid : r.ask
+  if (raw == null || raw === '') return '--'
+  return Number(raw).toFixed(2)
 }
 function spread(r) {
   if (r.bid==null||r.ask==null) return'--'
@@ -99,7 +106,41 @@ function spread(r) {
   if(b>0&&a===0)return'涨停'; if(a>0&&b===0)return'跌停'; if(b===0&&a===0)return'停牌'
   return (a-b).toFixed(3)
 }
-function select(row) { selected.value = row }
+// ---- Sparkline ----
+const sparkData = ref({})
+watch(all, async (list) => {
+  const codes = list.map(i => i.code).filter(Boolean)
+  if (!codes.length) return
+  try { sparkData.value = await stockApi.getSparkBatch(codes) || {} } catch {}
+}, { immediate: true, deep: false })
+
+function sparkPath(closes) {
+  if (!closes || closes.length < 2) return ''
+  const w = 72, h = 20, pad = 2
+  const min = Math.min(...closes), max = Math.max(...closes), range = max - min || 1
+  const xStep = (w - pad * 2) / (closes.length - 1)
+  return closes.map((v, i) => {
+    const x = pad + i * xStep
+    const y = pad + (1 - (v - min) / range) * (h - pad * 2)
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
+function sparkColor(closes) {
+  if (!closes || closes.length < 2) return 'var(--text-muted)'
+  return closes[closes.length - 1] >= closes[0] ? 'var(--stock-up)' : 'var(--stock-down)'
+}
+
+async function select(row) {
+  // 先立即显示 OHLCV 数据（名称、价格等）
+  selected.value = row
+  // 再异步拉取 Level-2 五档数据合并
+  if (row.code) {
+    try {
+      const detail = await stockApi.getStockDetail(row.code)
+      if (detail) selected.value = detail
+    } catch (e) { /* 无 Level-2 也保持 OHLCV 数据 */ }
+  }
+}
 
 const sm = computed(() => {
   let up=0,down=0
@@ -156,14 +197,20 @@ onMounted(async () => {
 .sl-row.sel { background: var(--accent-bg); border-left: 2px solid var(--accent); padding-left: 14px }
 
 .slr-idx { width: 24px; color: var(--text-muted); font-size: 10px; flex-shrink: 0; text-align: right }
+.slr-info { flex: 1; overflow: hidden; line-height: 1.3 }
 .slr-name {
-  flex: 1; font-weight: 500; font-size: 12px; color: var(--text-primary);
+  font-weight: 500; font-size: 12px; color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-sans);
+}
+.slr-code {
+  font-size: 10px; color: var(--text-muted); font-family: var(--font-mono);
+  display: block;
 }
 .slr-bid, .slr-ask { width: 62px; text-align: right; font-weight: 500; font-size: 11px }
 .slr-bid { color: var(--stock-down) }
 .slr-ask { color: var(--stock-up) }
 .slr-spr { width: 48px; text-align: right; color: var(--text-muted); font-size: 10px }
+.slr-spark { width: 72px; height: 20px; flex-shrink: 0; opacity: 0.8; }
 
 .sl-loading { padding: 24px 16px }
 .sl-empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:var(--text-muted); font-size:13px }
@@ -184,7 +231,7 @@ onMounted(async () => {
 .pg-info { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); min-width: 56px; text-align: center }
 
 /* ═══ Right Panel ═══ */
-.side-detail { flex: 1; overflow-y: auto; padding: 24px 32px; background: var(--bg-root) }
+.side-detail { flex: 1; overflow: hidden; padding: 0; background: var(--bg-root); display: flex; flex-direction: column }
 
 /* Placeholder */
 .ph {
