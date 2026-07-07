@@ -30,14 +30,14 @@ function buildOption(klineData) {
         axisLine: { lineStyle: { color: '#2D3340' } },
         axisTick: { show: false },
         axisLabel: { color: '#636D7E', fontSize: 10, fontFamily: "'Fira Code',monospace" },
-        boundaryGap: true
+        boundaryGap: false
       },
       {
         type: 'category', data: dates, gridIndex: 1,
         axisLine: { lineStyle: { color: '#2D3340' } },
         axisTick: { show: false },
         axisLabel: { show: false },
-        boundaryGap: true
+        boundaryGap: false
       }
     ],
     yAxis: [
@@ -66,6 +66,7 @@ function buildOption(klineData) {
     series: [
       {
         name: 'K线', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
+        barMaxWidth: 8,
         itemStyle: {
           color: '#e15241', color0: '#3cb371',
           borderColor: '#e15241', borderColor0: '#3cb371'

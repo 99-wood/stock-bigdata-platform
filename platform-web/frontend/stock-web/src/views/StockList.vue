@@ -116,9 +116,8 @@ watch(all, async (list) => {
 
 function sparkPath(closes) {
   if (!closes || closes.length < 2) return ''
-  const w = 72, h = 20, pad = 2
+  const h = 20, pad = 2, xStep = 2 // 固定 2px 点距，从左向右生长
   const min = Math.min(...closes), max = Math.max(...closes), range = max - min || 1
-  const xStep = (w - pad * 2) / (closes.length - 1)
   return closes.map((v, i) => {
     const x = pad + i * xStep
     const y = pad + (1 - (v - min) / range) * (h - pad * 2)

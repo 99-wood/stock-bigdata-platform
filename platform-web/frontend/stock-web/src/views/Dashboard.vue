@@ -108,36 +108,20 @@
 
       </section>
 
-      <!-- ═══ Tabbed Ranking (40% width) ═══ -->
+      <!-- ═══ 涨幅榜 ═══ -->
       <section class="rank-block">
-        <div class="rank-tabs">
-          <button
-            v-for="tab in rankTabs" :key="tab.key"
-            class="rank-tab"
-            :class="{ active: activeRank === tab.key }"
-            @click="activeRank = tab.key"
-          >
-            <span class="tab-label">{{ tab.label }}</span>
-          </button>
-        </div>
-        <div class="rank-body">
-          <RankPanel
-            :title="activeTab.label"
-            :data="activeTab.data"
-            :type="activeTab.type"
-            plain
-            @select="goStock"
-          />
-        </div>
+        <RankPanel :data="store.topUp" type="up" :plain="true" />
       </section>
       </div><!-- /content-left -->
 
-      <!-- ═══ Stock Detail Panel (right 60%) ═══ -->
-      <div class="content-right" v-if="selectedStock">
-        <button class="detail-close" @click="closeDetail" title="关闭">
-          <el-icon><Close /></el-icon>
-        </button>
-        <StockDetailPanel :stock="selectedStock" />
+      <!-- ═══ 跌幅榜 ═══ -->
+      <div class="content-mid">
+        <RankPanel :data="store.topDown" type="down" :plain="true" />
+      </div>
+
+      <!-- ═══ Treemap ═══ -->
+      <div class="content-right treemap-panel">
+        <MarketTreemap :up-data="treemapUp" :down-data="treemapDown" />
       </div>
     </div>
 
@@ -150,13 +134,13 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, Close } from '@element-plus/icons-vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { useStockStore } from '@/stores/stock'
 import { connectWebSocket, disconnectWebSocket } from '@/api/websocket'
-import { stockApi } from '@/api/request'
+import { stockApi, dashboardApi } from '@/api/request'
 import RankPanel from '@/components/RankPanel.vue'
-import StockDetailPanel from '@/components/StockDetailPanel.vue'
 import AlertTicker from '@/components/AlertTicker.vue'
+import MarketTreemap from '@/components/MarketTreemap.vue'
 
 const store = useStockStore()
 const router = useRouter()
@@ -197,17 +181,6 @@ const avgSign = computed(() => {
   return '—'
 })
 
-const topQuant = computed(() => store.topAmount.slice(0, 10))
-
-const activeRank = ref('up')
-const rankTabs = computed(() => [
-  { key: 'up',    label: '涨幅榜',     data: store.topUp,    type: 'up' },
-  { key: 'down',  label: '跌幅榜',     data: store.topDown,  type: 'down' },
-  { key: 'amount',label: '成交额榜',   data: store.topAmount,type: 'amount' },
-  { key: 'quant', label: '量化评分榜', data: topQuant.value, type: 'quant' }
-])
-const activeTab = computed(() => rankTabs.value.find(t => t.key === activeRank.value) || rankTabs.value[0])
-
 const searchCode = ref('')
 const searchOptions = ref([])
 const searchLoading = ref(false)
@@ -220,25 +193,18 @@ async function onSearch(kw) {
   finally { searchLoading.value = false }
 }
 
-function onSearchSelect(code) { if (code) goStock(code) }
+function onSearchSelect(code) { if (code) router.push('/stock/' + code) }
 
-const selectedStock = ref(null)
-const detailLoading = ref(false)
-
-async function goStock(code) {
-  detailLoading.value = true
+// Treemap
+const treemapUp = ref([]), treemapDown = ref([])
+async function fetchTreemap() {
   try {
-    selectedStock.value = await stockApi.getStockDetail(code)
-  } catch {
-    selectedStock.value = null
-  } finally {
-    detailLoading.value = false
-  }
+    const res = await dashboardApi.getTreemap()
+    if (res) { treemapUp.value = res.up || []; treemapDown.value = res.down || [] }
+  } catch {}
 }
-
-function closeDetail() {
-  selectedStock.value = null
-}
+fetchTreemap()
+setInterval(fetchTreemap, 30000)
 
 async function refreshAll() {
   await store.fetchAll()
@@ -385,6 +351,14 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
   flex-direction: column;
   gap: 0;
 }
+
+.content-mid {
+  width: 26%;
+  max-width: 420px;
+  flex-shrink: 0;
+  display: flex;
+}
+.content-mid > :deep(.panel) { flex: 1 }
 
 .content-right {
   flex: 1;

@@ -14,7 +14,7 @@
                 <span class="stock-name" v-if="item.name" :class="codeColor(item)">{{ item.name }}</span>
                 <span class="stock-code" :class="codeColor(item)">{{ item.code }}</span>
               </div>
-              <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 72 20" :stroke="sparkColor(sparkData[item.code])">
+              <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 90 20" :stroke="sparkColor(sparkData[item.code])">
                 <path :d="sparkPath(sparkData[item.code])" fill="none" stroke-width="1.2" />
               </svg>
               <div class="stock-sides">
@@ -32,7 +32,7 @@
                 <span class="stock-name" v-if="item.name" :class="codeColor(item)">{{ item.name }}</span>
                 <span class="stock-code" :class="codeColor(item)">{{ item.code }}</span>
               </div>
-              <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 72 20" :stroke="sparkColor(sparkData[item.code])">
+              <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 90 20" :stroke="sparkColor(sparkData[item.code])">
                 <path :d="sparkPath(sparkData[item.code])" fill="none" stroke-width="1.2" />
               </svg>
               <div class="stock-sides">
@@ -94,10 +94,8 @@ watch(() => props.data, (list) => {
 
 function sparkPath(closes) {
   if (!closes || closes.length < 2) return ''
-  const w = 72, h = 20, pad = 2
-  const min = Math.min(...closes), max = Math.max(...closes)
-  const range = max - min || 1
-  const xStep = (w - pad * 2) / (closes.length - 1)
+  const h = 20, pad = 2, xStep = 2 // 固定 2px 点距，从左向右生长
+  const min = Math.min(...closes), max = Math.max(...closes), range = max - min || 1
   return closes.map((v, i) => {
     const x = pad + i * xStep
     const y = pad + (1 - (v - min) / range) * (h - pad * 2)
@@ -136,7 +134,7 @@ function sparkColor(closes) {
 
 /* ---- Row ---- */
 .row {
-  display: flex; align-items: center; padding: 8px 14px; gap: 8px;
+  display: flex; align-items: center; padding: 2px 2px; gap: 1px;
   cursor: pointer; transition: background .1s;
   border-bottom: 1px solid rgba(45,51,64,0.3);
 }
@@ -144,8 +142,8 @@ function sparkColor(closes) {
 .row:last-child { border-bottom: none; margin-bottom: 0 }
 
 .rank-badge {
-  width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-sm); font-size: 11px; font-weight: 600;
+  width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;
+  border-radius: 0; font-size: 10px; font-weight: 600;
   color: var(--text-muted); background: var(--bg-elevated); flex-shrink: 0;
 }
 .rank-badge.r1 { background: var(--stock-up); color: #fff }
@@ -171,8 +169,8 @@ function sparkColor(closes) {
 .ask { color: var(--stock-up) }
 
 .spark-svg {
-  width: 56px; height: 18px; flex-shrink: 0;
-  margin: 0 2px; opacity: 0.8;
+  width: 90px; height: 18px; flex-shrink: 0;
+  margin: 0; opacity: 0.85;
 }
 .empty { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px }
 

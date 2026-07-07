@@ -19,9 +19,11 @@ public class RedisService {
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
 
-    /* MySQL dim_stock name lookup — null when mysql profile is not active */
+    /* MySQL fallback services — null when mysql profile is not active */
     @Autowired(required = false)
     private StockNameService stockNameService;
+    @Autowired(required = false)
+    private HistoryService historyService;
 
     public RedisService(StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper) {
         this.stringRedisTemplate = stringRedisTemplate;
@@ -112,6 +114,25 @@ public class RedisService {
                 dto.setName(stockNameService.getName(code));
             }
 
+            // 4. MySQL data fallback — Redis 归档/清库时从 dws_stock_day 补全
+            if (dto.getPrice() == null && historyService != null) {
+                List<Map<String, Object>> rows = historyService.getDailyHistory(code, 1);
+                if (rows != null && !rows.isEmpty()) {
+                    Map<String, Object> row = rows.get(0);
+                    dto.setPrice(toDouble(row.get("open")));  // use open as current price fallback
+                    dto.setOpen(toDouble(row.get("open")));
+                    dto.setHigh(toDouble(row.get("high")));
+                    dto.setLow(toDouble(row.get("low")));
+                    dto.setPrevClose(toDouble(row.get("close")));
+                    Object vol = row.get("volume"); if (vol != null) dto.setVolume(toLong(vol));
+                    Object amt = row.get("amount"); if (amt != null) dto.setAmount(toLong(amt));
+                    Object pct = row.get("change_pct"); if (pct != null) dto.setChangePct(toDouble(pct));
+                    Object td = row.get("trade_date"); if (td != null) dto.setTradeDate(String.valueOf(td));
+                    if (dto.getName() == null && stockNameService != null) dto.setName(stockNameService.getName(code));
+                    log.debug("MySQL fallback for code={}", code);
+                }
+            }
+
             return dto;
         } catch (JsonProcessingException e) {
             log.error("Failed to deserialize stock JSON for code: {}", code, e);
@@ -171,10 +192,11 @@ public class RedisService {
      * Uses ZRANGE (ascending) since negative values are the biggest losers.
      * Score IS change_pct.
      */
+    /** 跌幅榜 = stock:rank:up 中 score 最低（最负）的 topN */
     public List<RankItemDTO> getTopDown(int topN) {
         try {
             Set<ZSetOperations.TypedTuple<String>> tuples =
-                    stringRedisTemplate.opsForZSet().rangeWithScores(KEY_RANK_DOWN, 0, topN - 1);
+                    stringRedisTemplate.opsForZSet().rangeWithScores(KEY_RANK_UP, 0, topN - 1);
             return buildRankList(tuples, true);
         } catch (Exception e) {
             log.error("Failed to get top down rank", e);
@@ -589,6 +611,78 @@ public class RedisService {
     /**
      * Helper to extract a string value from a Redis hash entries map.
      */
+    /** Treemap: top 20 gainers + top 20 losers by amount. */
+    public Map<String, List<Map<String, Object>>> getTreemap() {
+        Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
+        result.put("up", new ArrayList<>());
+        result.put("down", new ArrayList<>());
+        try {
+            Set<String> codes = stringRedisTemplate.opsForSet().members(KEY_OHLCV_CODES);
+            if (codes == null || codes.isEmpty()) return result;
+
+            List<String> codeList = new ArrayList<>(codes);
+            List<String> keys = codeList.stream().map(c -> KEY_OHLCV_PREFIX + c).collect(Collectors.toList());
+            List<String> jsonList = stringRedisTemplate.opsForValue().multiGet(keys);
+            if (jsonList == null) return result;
+
+            List<StockLatestDTO> all = new ArrayList<>();
+            for (int i = 0; i < jsonList.size(); i++) {
+                if (jsonList.get(i) == null) continue;
+                try {
+                    StockLatestDTO dto = objectMapper.readValue(jsonList.get(i), StockLatestDTO.class);
+                    dto.setCode(codeList.get(i));
+                    all.add(dto);
+                } catch (Exception e) { /* skip */ }
+            }
+
+            // Separate gainers / losers, sort each by amount desc
+            List<StockLatestDTO> gainers = all.stream()
+                .filter(s -> s.getChangePct() != null && s.getChangePct() > 0)
+                .sorted((a, b) -> Long.compare(
+                    b.getAmount() != null ? b.getAmount() : 0L,
+                    a.getAmount() != null ? a.getAmount() : 0L))
+                .limit(20).collect(Collectors.toList());
+
+            List<StockLatestDTO> losers = all.stream()
+                .filter(s -> s.getChangePct() != null && s.getChangePct() < 0)
+                .sorted((a, b) -> Long.compare(
+                    b.getAmount() != null ? b.getAmount() : 0L,
+                    a.getAmount() != null ? a.getAmount() : 0L))
+                .limit(20).collect(Collectors.toList());
+
+            for (StockLatestDTO s : gainers) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("code", s.getCode());
+                item.put("name", s.getName() != null ? s.getName() : s.getCode());
+                item.put("changePct", Math.round(s.getChangePct() * 100.0) / 100.0);
+                item.put("amount", s.getAmount() != null ? s.getAmount() : 0L);
+                result.get("up").add(item);
+            }
+            for (StockLatestDTO s : losers) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("code", s.getCode());
+                item.put("name", s.getName() != null ? s.getName() : s.getCode());
+                item.put("changePct", Math.round(s.getChangePct() * 100.0) / 100.0);
+                item.put("amount", s.getAmount() != null ? s.getAmount() : 0L);
+                result.get("down").add(item);
+            }
+        } catch (Exception e) {
+            log.warn("Treemap failed: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    private Double toDouble(Object v) {
+        if (v == null) return null;
+        if (v instanceof Number) return ((Number) v).doubleValue();
+        try { return Double.parseDouble(v.toString()); } catch (Exception e) { return null; }
+    }
+    private Long toLong(Object v) {
+        if (v == null) return null;
+        if (v instanceof Number) return ((Number) v).longValue();
+        try { return Long.parseLong(v.toString()); } catch (Exception e) { return null; }
+    }
+
     private String getStringValue(Map<Object, Object> entries, String key) {
         Object value = entries.get(key);
         if (value == null) return null;
