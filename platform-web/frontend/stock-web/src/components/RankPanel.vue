@@ -1,6 +1,6 @@
 <template>
-  <div class="panel">
-    <div class="panel-head">
+  <div class="panel" :class="{ plain: plain }">
+    <div class="panel-head" v-if="!plain">
       <h3 class="panel-title">{{ title }}</h3>
       <span class="panel-count">{{ data.length }}</span>
     </div>
@@ -34,7 +34,8 @@ import { ArrowRight } from '@element-plus/icons-vue'
 import { getStockColorClass } from '@/utils/stockColor'
 
 const props = defineProps({
-  title: String, data: Array, type: String
+  title: String, data: Array, type: String,
+  plain: { type: Boolean, default: false }
 })
 defineEmits(['select'])
 
@@ -73,7 +74,13 @@ function side(item, s) {
   overflow: hidden;
   transition: border-color .2s;
 }
+.panel.plain {
+  background: none;
+  border: none;
+  border-radius: 0;
+}
 .panel:hover { border-color: var(--border-strong) }
+.panel.plain:hover { border-color: transparent }
 
 .panel-head {
   display: flex; align-items: center; justify-content: space-between;
