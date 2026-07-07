@@ -46,10 +46,11 @@ else
     ssh mid \
         'mysql -ustock_admin -pstock2026 stock_ads -e "
            TRUNCATE TABLE ads_market_summary;
+           TRUNCATE TABLE ads_stock_rank;
            TRUNCATE TABLE dws_stock_minute;
            TRUNCATE TABLE dws_stock_day;
          " 2>/dev/null
-         echo "  ✓ MySQL ads_market_summary / dws_stock_minute / dws_stock_day 已清空"'
+         echo "  ✓ MySQL 4 表已清空"'
 fi
 
 # ---- 4. 清空 HDFS ----
