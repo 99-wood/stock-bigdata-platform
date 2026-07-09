@@ -100,17 +100,20 @@ watch(() => props.data, (list) => {
 function sparkPath(closes) {
   if (!closes || closes.length < 2) return ''
   const h = 20, pad = 0, xStep = 2 // 固定 2px 点距，从左向右生长
-  const min = Math.min(...closes), max = Math.max(...closes), range = max - min || 1
+  const min = Math.min(...closes), max = Math.max(...closes), range = max - min
+  const midY = (h - pad * 2) / 2 // 居中位 = 10，平盘线不贴底
   return closes.map((v, i) => {
     const x = pad + i * xStep
-    const y = pad + (1 - (v - min) / range) * (h - pad * 2)
+    const y = range === 0 ? midY : pad + (1 - (v - min) / range) * (h - pad * 2)
     return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
   }).join(' ')
 }
 
 function sparkColor(closes) {
   if (!closes || closes.length < 2) return 'var(--text-muted)'
-  return closes[closes.length - 1] >= closes[0] ? 'var(--stock-up)' : 'var(--stock-down)'
+  const first = closes[0], last = closes[closes.length - 1]
+  if (first === last) return 'var(--text-muted)' // 平盘用灰色
+  return last > first ? 'var(--stock-up)' : 'var(--stock-down)'
 }
 </script>
 
