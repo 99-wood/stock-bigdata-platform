@@ -14,9 +14,11 @@
                 <span class="stock-name" v-if="item.name" :class="codeColor(item)">{{ item.name }}</span>
                 <span class="stock-code" :class="codeColor(item)">{{ item.code }}</span>
               </div>
-              <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 90 20" :stroke="sparkColor(sparkData[item.code])">
-                <path :d="sparkPath(sparkData[item.code])" fill="none" stroke-width="1.2" />
-              </svg>
+              <span class="spark-wrap">
+                <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 56 20" preserveAspectRatio="xMinYMid meet" :stroke="sparkColor(sparkData[item.code])">
+                  <path :d="sparkPath(sparkData[item.code])" fill="none" stroke-width="1.2" />
+                </svg>
+              </span>
               <div class="stock-sides">
                 <span class="ask">{{ side(item, 'ask') }}</span>
                 <span class="bid">{{ side(item, 'bid') }}</span>
@@ -32,9 +34,11 @@
                 <span class="stock-name" v-if="item.name" :class="codeColor(item)">{{ item.name }}</span>
                 <span class="stock-code" :class="codeColor(item)">{{ item.code }}</span>
               </div>
-              <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 90 20" :stroke="sparkColor(sparkData[item.code])">
-                <path :d="sparkPath(sparkData[item.code])" fill="none" stroke-width="1.2" />
-              </svg>
+              <span class="spark-wrap">
+                <svg v-if="sparkData[item.code]" class="spark-svg" viewBox="0 0 56 20" preserveAspectRatio="xMinYMid meet" :stroke="sparkColor(sparkData[item.code])">
+                  <path :d="sparkPath(sparkData[item.code])" fill="none" stroke-width="1.2" />
+                </svg>
+              </span>
               <div class="stock-sides">
                 <span class="ask">{{ side(item, 'ask') }}</span>
                 <span class="bid">{{ side(item, 'bid') }}</span>
@@ -95,7 +99,7 @@ watch(() => props.data, (list) => {
 
 function sparkPath(closes) {
   if (!closes || closes.length < 2) return ''
-  const h = 20, pad = 2, xStep = 2 // 固定 2px 点距，从左向右生长
+  const h = 20, pad = 0, xStep = 2 // 固定 2px 点距，从左向右生长
   const min = Math.min(...closes), max = Math.max(...closes), range = max - min || 1
   return closes.map((v, i) => {
     const x = pad + i * xStep
@@ -151,7 +155,7 @@ function sparkColor(closes) {
 .rank-badge.r2 { background: #e17341; color: #fff }
 .rank-badge.r3 { background: var(--stock-warn); color: #1A1A1A }
 
-.stock-main { flex: 1; overflow: hidden; line-height: 1.3 }
+.stock-main { overflow: hidden; line-height: 1.3; flex-shrink: 0 }
 .stock-name {
   display: block;
   font-size: 12px; font-weight: 500; color: var(--text-primary);
@@ -164,14 +168,19 @@ function sparkColor(closes) {
 
 .stock-sides {
   display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
-  font-size: 11px; font-family: var(--font-mono); flex-shrink: 0;
+  font-size: 10px; font-family: var(--font-mono); flex-shrink: 0;
 }
 .bid { color: var(--stock-down) }
 .ask { color: var(--stock-up) }
 
+.spark-wrap {
+  flex: 1; height: 18px;
+  display: flex; align-items: center;
+  min-width: 40px;
+}
 .spark-svg {
-  width: 90px; height: 18px; flex-shrink: 0;
-  margin: 0; opacity: 0.85;
+  width: 100%; height: 100%;
+  opacity: 0.85;
 }
 .empty { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px }
 

@@ -104,7 +104,7 @@ onUnmounted(() => clearInterval(timer))
 <style scoped>
 .anomaly-panel {
   height: 100%;
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: row;
   overflow: hidden;
 }
 
@@ -112,11 +112,11 @@ onUnmounted(() => clearInterval(timer))
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 .ap-sec + .ap-sec {
-  border-top: 1px solid var(--border-subtle);
+  border-left: 1px solid var(--border-subtle);
 }
 
 .ap-sec-head {

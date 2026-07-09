@@ -91,8 +91,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.treemap-dual { display: flex; flex-direction: column; height: 100%; gap: 0 }
-.tm-half { flex: 1; display: flex; flex-direction: column; min-height: 0 }
+.treemap-dual { display: flex; flex-direction: row; height: 100%; gap: 0 }
+.tm-half { flex: 1; display: flex; flex-direction: column; min-width: 0 }
+.tm-half + .tm-half { border-left: 1px solid var(--border-subtle) }
 .tm-title { font-size: 11px; font-weight: 600; padding: 4px 8px; letter-spacing: .04em; flex-shrink: 0 }
 .tm-title.up { color: #FF495B; background: rgba(255,73,91,0.08); border-bottom: 1px solid rgba(255,73,91,0.2) }
 .tm-title.down { color: #3FB950; background: rgba(63,185,80,0.08); border-bottom: 1px solid rgba(63,185,80,0.2) }

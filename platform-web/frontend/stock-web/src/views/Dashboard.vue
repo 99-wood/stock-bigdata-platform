@@ -48,8 +48,9 @@
     </header>
 
     <div class="dashboard-content">
-      <div class="content-left">
-        <!-- ═══ Market Breadth ═══ -->
+      <!-- ═══ Left Column ═══ -->
+      <div class="col-left">
+        <!-- Market Breadth (top half) -->
         <section class="kpi-strip">
           <div class="breadth-card">
           <!-- header with inline stats -->
@@ -108,10 +109,9 @@
             </div>
           </div>
         </div>
-
       </section>
 
-      <!-- ═══ 涨幅榜 + 跌幅榜 双列 ═══ -->
+      <!-- 涨幅榜 + 跌幅榜 (bottom half) -->
       <section class="rank-dual">
         <div class="rank-half">
           <div class="rank-label up">涨幅榜</div>
@@ -122,17 +122,19 @@
           <RankPanel :data="store.topDown" type="down" :plain="true" />
         </div>
       </section>
-      </div><!-- /content-left -->
+      </div><!-- /col-left -->
 
-      <!-- ═══ 异动速览 ═══ -->
-      <div class="content-mid">
-        <AnomalyPanel />
-      </div>
-
-      <!-- ═══ Treemap ═══ -->
-      <div class="content-right">
-        <MarketTreemap :up-data="treemapUp" :down-data="treemapDown" />
-      </div>
+      <!-- ═══ Right Column ═══ -->
+      <div class="col-right">
+        <!-- Treemaps (top half) -->
+        <div class="right-top">
+          <MarketTreemap :up-data="treemapUp" :down-data="treemapDown" />
+        </div>
+        <!-- Anomaly (bottom half) -->
+        <div class="right-bottom">
+          <AnomalyPanel />
+        </div>
+      </div><!-- /col-right -->
     </div>
 
     <!-- ═══ Glass Alert Ticker ═══ -->
@@ -445,7 +447,7 @@ onUnmounted(() => {
 .spin { animation: rot 1s linear infinite }
 @keyframes rot { to { transform: rotate(360deg) } }
 
-/* ═══ Content — flex row: left 40% + right 60% ═══ */
+/* ═══ Content — left/right columns ═══ */
 .dashboard-content {
   flex: 1;
   width: 100%;
@@ -457,30 +459,32 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-.content-left {
-  width: 50%;
+.col-left {
+  width: 45%;
   flex-shrink: 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 0;
 }
 
-.content-mid {
-  width: 20%;
-  flex-shrink: 0;
+.col-right {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  min-width: 0;
 }
 
-.content-right {
-  width: 30%;
-  flex-shrink: 0;
+.right-top {
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
+}
+
+.right-bottom {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* ═══ Market Breadth ═══ */
@@ -668,18 +672,6 @@ onUnmounted(() => {
 .rank-label.up { color: var(--stock-up) }
 .rank-label.down { color: var(--stock-down) }
 
-/* ═══ Ranking Block (deprecated, kept for kpi-strip) ═══ */
-.rank-block {
-  flex: 1;
-  width: 100%;
-  display: flex; flex-direction: column;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 0;
-  overflow: hidden;
-  margin-bottom: 0;
-}
-
 /* ═══ Search dropdown ═══ */
 .search-row { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px }
 .sr-name { font-weight: 500 }
@@ -688,9 +680,8 @@ onUnmounted(() => {
 
 @media (max-width: 860px) {
   .dashboard-content { flex-direction: column }
-  .content-left { width: 100% }
-  .content-mid { width: 100%; height: 45vh }
-  .content-right { flex: none; height: 50vh }
+  .col-left { width: 100% }
+  .col-right { flex: none; height: 60vh }
   .breadth-metrics { grid-template-columns: repeat(2, 1fr) }
 }
 @media (max-width: 768px) {
