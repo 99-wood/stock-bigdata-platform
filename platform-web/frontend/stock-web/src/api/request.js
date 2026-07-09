@@ -38,7 +38,8 @@ export const stockApi = {
   getTopQuant: (count = 20) => request.get('/stocks/top-quant', { params: { count } }),
   getStockDetail: (code) => request.get(`/stocks/${code}`),
   getStockMinutes: (code, date) => request.get(`/stocks/${code}/minutes`, { params: { date } }),
-  getSparkBatch: (codes) => request.post('/stocks/spark-batch', codes)
+  getSparkBatch: (codes) => request.post('/stocks/spark-batch', codes),
+  getAnomaly: (type = 'amplitude', limit = 10) => request.get('/stocks/anomaly', { params: { type, limit } })
 }
 
 // Alert API

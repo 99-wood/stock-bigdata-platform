@@ -75,8 +75,9 @@ const leftCol = computed(() => props.data.slice(0, 10))
 const rightCol = computed(() => props.data.slice(10, 20))
 
 function side(item, which) {
-  const v = which === 'bid' ? Number(item.bid) : Number(item.ask)
-  return v != null ? v.toFixed(2) : '--'
+  const raw = which === 'bid' ? item.bid : item.ask
+  if (raw == null) return '--'
+  return Number(raw).toFixed(2)
 }
 
 // ---- Sparkline ----

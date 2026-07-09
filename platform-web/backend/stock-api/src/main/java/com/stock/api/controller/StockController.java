@@ -53,6 +53,16 @@ public class StockController {
         return ApiResponse.success(redisService.getAllStocks());
     }
 
+    @GetMapping("/anomaly")
+    public ApiResponse<List<Map<String, Object>>> anomaly(
+            @RequestParam(defaultValue = "amplitude") String type,
+            @RequestParam(defaultValue = "10") int limit) {
+        if (historyService == null) {
+            return ApiResponse.error(503, "MySQL history not available (activate mysql profile)");
+        }
+        return ApiResponse.success(historyService.getAnomaly(type, limit));
+    }
+
     @GetMapping("/{code}/history")
     public ApiResponse<List<Map<String, Object>>> stockHistory(
             @PathVariable String code,

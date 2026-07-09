@@ -53,6 +53,53 @@ public class HistoryService {
         return result;
     }
 
+    /** Get anomaly stocks: amplitude / volume_spike / limit_up_down. */
+    public List<Map<String, Object>> getAnomaly(String type, int limit) {
+        try {
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+            // Get latest trade date
+            String latestDate = jdbc.queryForObject(
+                "SELECT MAX(trade_date) FROM dws_stock_day", String.class);
+            if (latestDate == null) return Collections.emptyList();
+
+            switch (type) {
+                case "amplitude":
+                    return jdbc.queryForList(
+                        "SELECT d.code, s.name, d.close AS price, d.change_pct, d.volume, d.amount, " +
+                        "ROUND((d.high - d.low) / NULLIF(d.open, 0) * 100, 2) AS anomaly_val " +
+                        "FROM dws_stock_day d LEFT JOIN dim_stock s ON d.code = s.code " +
+                        "WHERE d.trade_date = ? ORDER BY anomaly_val DESC LIMIT ?",
+                        latestDate, limit);
+                case "volume_spike":
+                    return jdbc.queryForList(
+                        "SELECT a.code, s.name, a.close AS price, a.change_pct, " +
+                        "a.volume AS vol_today, b.volume AS vol_yesterday, " +
+                        "ROUND(a.volume / NULLIF(b.volume, 0), 2) AS anomaly_val " +
+                        "FROM dws_stock_day a " +
+                        "LEFT JOIN dws_stock_day b ON a.code = b.code AND b.trade_date = DATE_SUB(?, INTERVAL 1 DAY) " +
+                        "LEFT JOIN dim_stock s ON a.code = s.code " +
+                        "WHERE a.trade_date = ? AND b.volume > 0 " +
+                        "ORDER BY anomaly_val DESC LIMIT ?",
+                        latestDate, latestDate, limit);
+                case "limit_up_down":
+                    return jdbc.queryForList(
+                        "SELECT d.code, s.name, d.close AS price, d.change_pct AS anomaly_val, " +
+                        "d.volume, d.amount " +
+                        "FROM dws_stock_day d LEFT JOIN dim_stock s ON d.code = s.code " +
+                        "WHERE d.trade_date = ? AND ( " +
+                        "  (d.code LIKE 'sh688%' AND (d.change_pct >= 19.9 OR d.change_pct <= -19.9)) OR " +
+                        "  (d.code NOT LIKE 'sh688%' AND (d.change_pct >= 9.9 OR d.change_pct <= -9.9)) " +
+                        ") ORDER BY ABS(d.change_pct) DESC LIMIT ?",
+                        latestDate, limit);
+                default:
+                    return Collections.emptyList();
+            }
+        } catch (Exception e) {
+            log.warn("Failed anomaly query type={}: {}", type, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
     /** Get minute K-line for a specific date. */
     public List<Map<String, Object>> getMinuteHistory(String code, String date) {
         try {

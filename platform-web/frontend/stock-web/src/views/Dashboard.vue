@@ -108,19 +108,26 @@
 
       </section>
 
-      <!-- ═══ 涨幅榜 ═══ -->
-      <section class="rank-block">
-        <RankPanel :data="store.topUp" type="up" :plain="true" />
+      <!-- ═══ 涨幅榜 + 跌幅榜 双列 ═══ -->
+      <section class="rank-dual">
+        <div class="rank-half">
+          <div class="rank-label up">涨幅榜</div>
+          <RankPanel :data="store.topUp" type="up" :plain="true" />
+        </div>
+        <div class="rank-half">
+          <div class="rank-label down">跌幅榜</div>
+          <RankPanel :data="store.topDown" type="down" :plain="true" />
+        </div>
       </section>
       </div><!-- /content-left -->
 
-      <!-- ═══ 跌幅榜 ═══ -->
+      <!-- ═══ 异动速览 ═══ -->
       <div class="content-mid">
-        <RankPanel :data="store.topDown" type="down" :plain="true" />
+        <AnomalyPanel />
       </div>
 
       <!-- ═══ Treemap ═══ -->
-      <div class="content-right treemap-panel">
+      <div class="content-right">
         <MarketTreemap :up-data="treemapUp" :down-data="treemapDown" />
       </div>
     </div>
@@ -141,6 +148,7 @@ import { stockApi, dashboardApi } from '@/api/request'
 import RankPanel from '@/components/RankPanel.vue'
 import AlertTicker from '@/components/AlertTicker.vue'
 import MarketTreemap from '@/components/MarketTreemap.vue'
+import AnomalyPanel from '@/components/AnomalyPanel.vue'
 
 const store = useStockStore()
 const router = useRouter()
@@ -344,7 +352,7 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 }
 
 .content-left {
-  width: 30%;
+  width: 50%;
   flex-shrink: 0;
   padding: 0;
   display: flex;
@@ -353,39 +361,21 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 }
 
 .content-mid {
-  width: 26%;
-  max-width: 420px;
+  width: 20%;
   flex-shrink: 0;
   display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
 }
-.content-mid > :deep(.panel) { flex: 1 }
 
 .content-right {
-  flex: 1;
-  min-width: 0;
+  width: 30%;
+  flex-shrink: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
-
-.detail-close {
-  position: sticky;
-  top: 0;
-  float: right;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px; height: 28px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 14px;
-  transition: all .15s;
-}
-.detail-close:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg) }
 
 /* ═══ Market Breadth ═══ */
 .kpi-strip {
@@ -527,69 +517,55 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
   white-space: nowrap;
 }
 
-/* ═══ Tabbed Ranking Block ═══ */
+/* ═══ Rank Dual (涨幅+跌幅 side by side) ═══ */
+.rank-dual {
+  flex: 1;
+  display: flex;
+  gap: 0;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.rank-half {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.rank-half + .rank-half {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.rank-half > :deep(.panel) {
+  flex: 1;
+  border: none;
+  background: transparent;
+}
+
+.rank-label {
+  font-size: 10px; font-weight: 600;
+  padding: 3px 8px;
+  color: var(--text-muted);
+  background: var(--accent-bg);
+  letter-spacing: .04em;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.rank-label.up { color: var(--stock-up) }
+.rank-label.down { color: var(--stock-down) }
+
+/* ═══ Ranking Block (deprecated, kept for kpi-strip) ═══ */
 .rank-block {
   flex: 1;
   width: 100%;
+  display: flex; flex-direction: column;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 0;
   overflow: hidden;
   margin-bottom: 0;
-}
-
-/* --- tab bar --- */
-.rank-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 0;
-  background: rgba(255,255,255,0.02);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.rank-tab {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 12px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background .18s, color .18s;
-}
-.rank-tab:hover { color: var(--text-primary); background: rgba(255,255,255,0.04) }
-
-.rank-tab.active {
-  background: var(--accent-bg);
-  color: var(--accent);
-}
-
-.tab-label { white-space: nowrap }
-
-.tab-badge {
-  font-size: 10px;
-  font-weight: 600;
-  font-family: var(--font-mono);
-  padding: 1px 6px;
-  border-radius: var(--radius-full);
-  background: rgba(255,255,255,0.06);
-}
-.rank-tab.active .tab-badge {
-  background: var(--accent-bg-hover);
-}
-
-/* --- rank body --- */
-.rank-body {
-  max-height: 540px;
-  overflow-y: auto;
-}
-.rank-body :deep(.panel-body) {
-  max-height: none;
 }
 
 /* ═══ Search dropdown ═══ */
@@ -601,10 +577,9 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 @media (max-width: 860px) {
   .dashboard-content { flex-direction: column }
   .content-left { width: 100% }
-  .content-right { position: static; max-height: none; flex: none }
+  .content-mid { width: 100%; height: 45vh }
+  .content-right { flex: none; height: 50vh }
   .breadth-metrics { grid-template-columns: repeat(2, 1fr) }
-  .rank-tabs { flex-wrap: wrap; gap: 4px }
-  .rank-tab { padding: 5px 12px; font-size: 12px }
 }
 @media (max-width: 768px) {
   .header-nav { display: none }

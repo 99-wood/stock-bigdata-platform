@@ -99,24 +99,33 @@ GET stock:quote:{code} → merge Level-2 fields (bid/ask, depth, status)
 
 Spark batch (minute close arrays) uses JVM in-memory `volatile Map` with 30s TTL. First request triggers Pipeline HGET across all codes×windows. Subsequent requests hit cache. Never writes to Redis.
 
+### Pattern: MySQL fallback (Redis archiving)
+
+When Redis is flushed/archived, `RedisService.getStockLatest()` falls back to `HistoryService.getDailyHistory(code, 1)` to load latest daily row from MySQL `dws_stock_day`. Only active with `@Profile("mysql")`.
+
+### Pattern: Treemap API
+
+`GET /api/dashboard/treemap` returns `{up: [...], down: [...]}` — top 20 gainers and losers by amount, separately. Uses SMEMBERS + MGET across all OHLCV codes.
+
 ## Frontend architecture
 
 ### Router
 
 - `/` → redirects to `/dashboard`
-- `/dashboard` → main dashboard (market summary + rank panels + treemap or stock detail)
-- `/stocks` → split-panel stock list with inline detail
+- `/dashboard` → 3-column dashboard: 涨幅榜 (left) + 跌幅榜 (mid) + MarketTreemap (right). No click interaction on rank items (read-only display).
+- `/stocks` → split-panel stock list with inline detail (click to view Level-2 depth)
 - `/stock/:code` → standalone stock detail page
+- `/admin` → copy of dashboard, reserved for future customization
 
 ### Key components
 
 | Component | Role |
 |-----------|------|
-| `Dashboard.vue` | Main dashboard. Left 30%: market breadth + tabbed rank panels. Right 70%: `StockDetailPanel` (when stock selected) or `MarketTreemap` (default). |
-| `RankPanel.vue` | Ranked stock list. Two-column layout (1-10 left, 11-20 right). Sparkline mini charts, FLIP transition animation. |
-| `StockDetailPanel.vue` | Inline stock detail. Hero (name/code/price/bid-ask) + OHLCV grid + KLineChart + depth ladder. Fetches Level-2 on select. |
-| `KLineChart.vue` | ECharts candlestick + volume bar. Minute K-line from Redis. |
-| `MarketTreemap.vue` | ECharts treemap. Top 100 by amount, color = change_pct (red/green), size = amount. |
+| `Dashboard.vue` | 3-column layout: market breadth + 涨幅榜 (left 26%) | 跌幅榜 (mid 26%) | `MarketTreemap` (right, flex:1). Rank items are display-only (no click). |
+| `RankPanel.vue` | Ranked stock list with two-column layout (1-10 left, 11-20 right). Sparkline mini SVG charts (2px fixed step, left-to-right growth), FLIP/TransitionGroup animation. Compact row padding, rank badge 16px no-radius. |
+| `StockDetailPanel.vue` | Stock detail: hero section (name/code/price/bid-ask + 8-field OHLCV inline grid) + `KLineChart` + depth ladder (25% right). Fetches Redis OHLCV + Level-2 merge. Name color follows change_pct. Time uses accent color (11px). |
+| `KLineChart.vue` | ECharts candlestick + volume bar. `boundaryGap: false` + `barMaxWidth: 8` prevents single-candle stretch. Grid: K-line 70% height, volume 26%. Minute K-line from Redis. |
+| `MarketTreemap.vue` | Dual ECharts treemap: Top 20 gainers (red) + Top 20 losers (green) by amount. Slice layout (`squareRatio: 1.5`). Color: `rgba(255,73,91,opacity)` / `rgba(63,185,80,opacity)`, opacity 0.5→1.0 linear by |change_pct| capped at ±10%. Font size 11-24px √amount. |
 | `AlertTicker.vue` | Scrolling alert bar at page bottom. |
 
 ### State management (Pinia)
@@ -125,7 +134,7 @@ Spark batch (minute close arrays) uses JVM in-memory `volatile Map` with 30s TTL
 
 ### Color utility
 
-`utils/stockColor.js` — `getStockDirection(stock)` checks `change_pct ?? changePct` then `bid/ask` for limit detection, `status` for suspended/delisted. Returns CSS class suffix. CSS variables: `--stock-up` (red #e15241), `--stock-down` (green #3cb371), `--stock-warn` (amber).
+`utils/stockColor.js` — `getStockDirection(stock)` checks `change_pct ?? changePct` then `bid/ask` for limit detection, `status` for suspended/delisted. Returns CSS class suffix. CSS variables: `--stock-up` (red #FF495B), `--stock-down` (green #3FB950), `--stock-warn` (amber #D29922). Ensure all components use these exact values for consistency.
 
 ### Unit conventions
 
@@ -141,6 +150,9 @@ Spark batch (minute close arrays) uses JVM in-memory `volatile Map` with 30s TTL
 - **`stock:rank:down` does not exist**. 跌幅榜 = `ZRANGE stock:rank:up 0 19` (ascending, most negative first).
 - **MyBatis was removed** — use `JdbcTemplate` for MySQL queries.
 - **The `dev` profile is split** into `application-dev.yml` for Redis config. Main `application.yml` excludes datasource auto-config by default.
+- **Dashboard is read-only** — rank items have no `@select` handler. Search still navigates to `/stock/:code`.
+- **Treemap color must match CSS variables**: `#FF495B` (up) and `#3FB950` (down). Hardcoded values break visual consistency.
+- **Sparkline uses fixed 2px x-step** — data grows rightward, not proportionally scaled. SVG viewBox 90×20.
 
 ## Branch
 
