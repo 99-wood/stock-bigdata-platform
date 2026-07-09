@@ -1,9 +1,13 @@
 package com.stock.streaming;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stock.batch.MarketFlusher;
 import com.stock.common.Config;
+import com.stock.common.OdsRecord;
+import com.stock.common.RedisUtil;
 import com.stock.common.StockQuote;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.OffsetCommitCallback;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaRDD;
@@ -23,9 +27,21 @@ import java.util.*;
 /**
  * Spark Streaming 实时行情消费主入口
  *
+ * <pre>
  * 数据流:
  *   Kafka(stock_quote_raw) → 解析JSON → 过滤脏数据 → 计算涨跌幅
- *   → dim_stock / MarketDataWriter(Redis+MySQL) / HDFS ODS+DWD 落盘
+ *   → dim_stock 维表更新 / MarketDataWriter(Redis+MySQL) / HDFS ODS+DWD 落盘
+ *
+ * 启动模式:
+ *   正常: auto.offset.reset=latest, 消费新数据
+ *   --replay: auto.offset.reset=earliest + 重置Kafka offset → 从头消费（调试用）
+ *   --date YYYY-MM-DD: 只处理指定日期（需配合 --replay，daily-replay 专用）
+ *
+ * 优雅停止:
+ *   1. consumer-stop.sh 创建 /tmp/stock-consumer-stop 标记文件
+ *   2. 下个 batch 开始时检测到标记 → flush Redis → MySQL → 置 shutdownRequested=true
+ *   3. 后台守护线程检测到标记 → 从外部调用 ssc.stop()（避免 foreachRDD 内死锁）
+ * </pre>
  */
 public class QuoteStreamingJob {
 
@@ -42,12 +58,33 @@ public class QuoteStreamingJob {
     private static volatile boolean shutdownRequested = false;
 
     private static boolean replayMode = false;
+    /** 只处理指定日期的数据（null=全部处理） */
+    private static String targetDate = null;
 
     public static void main(String[] args) throws InterruptedException {
 
-        for (String arg : args) {
-            if ("--replay".equals(arg)) replayMode = true;
+        for (int i = 0; i < args.length; i++) {
+            if ("--replay".equals(args[i])) {
+                replayMode = true;
+            } else if ("--date".equals(args[i]) && i + 1 < args.length) {
+                targetDate = args[++i];
+            }
         }
+
+        // ---- 0. Redis 初始化 ----
+        if (Config.flushdbOnStart()) {
+            try (redis.clients.jedis.Jedis jedis = RedisUtil.newJedis()) {
+                jedis.flushDB();
+                LOG.info("[QuoteStreamingJob] Redis FLUSHDB 完成");
+            } catch (Exception e) {
+                LOG.warn("[QuoteStreamingJob] Redis FLUSHDB 失败: {}", e.getMessage());
+            }
+        } else {
+            LOG.info("[QuoteStreamingJob] 跳过 FLUSHDB (feature.redis.flushdb.onstart=false)");
+        }
+
+        // ---- 系统状态 ----
+        SystemStatusWriter.markStartup(replayMode ? "replay" : "normal", targetDate);
 
         // ---- 1. StreamingContext（去 checkpoint，offset 由 Kafka 管理） ----
         SparkConf conf = new SparkConf()
@@ -63,7 +100,9 @@ public class QuoteStreamingJob {
 
         // ---- 2. 启动 ----
         ssc.start();
-        LOG.info("QuoteStreamingJob 已启动, {}模式, 等待数据...", replayMode ? "replay" : "正常");
+        String mode = replayMode ? "replay" : "正常";
+        if (targetDate != null) mode += ", date=" + targetDate;
+        LOG.info("[QuoteStreamingJob] 启动: {}模式, 等待数据...", mode);
         ssc.awaitTermination();
     }
 
@@ -90,82 +129,138 @@ public class QuoteStreamingJob {
                 ConsumerStrategies.Subscribe(topics, kafkaParams)
         );
 
-        // ---- 核心处理 ----
+        // ---- 核心处理: 每个 batch 执行一次 ----
         stream.foreachRDD(rdd -> {
-            // 优雅停止: flush → 置标记 → 后台线程 stop
+            // ============================================================
+            // 优雅停止检测
+            // ============================================================
             if (isShutdownRequested()) {
-                LOG.info("检测到 shutdown marker, flush 数据...");
-                try (redis.clients.jedis.Jedis jedis = MarketDataWriter.newJedis()) {
-                    MarketDataWriter.flushAll(jedis);
+                LOG.info("[QuoteStreamingJob] 检测到 shutdown marker, 开始 flush...");
+                long t0 = System.currentTimeMillis();
+                try (redis.clients.jedis.Jedis jedis = RedisUtil.newJedis()) {
+                    MarketFlusher.flushAll(jedis);
                 } catch (Exception e) {
-                    LOG.error("shutdown flush 失败", e);
+                    LOG.error("[QuoteStreamingJob] shutdown flush 失败", e);
                 }
+                LOG.info("[QuoteStreamingJob] shutdown flush 完成, elapsed={}ms",
+                        System.currentTimeMillis() - t0);
                 shutdownRequested = true;
                 return;
             }
 
-            if (rdd.isEmpty()) {
-                return;
-            }
+            if (rdd.isEmpty()) return;
 
-            // ODS 层 —— 原始 JSON 归档
+            long batchStart = System.currentTimeMillis();
+            // 用 Kafka offset range 算 raw count，不触发额外 Spark action
+            OffsetRange[] batchOffsets = ((HasOffsetRanges) rdd.rdd()).offsetRanges();
+            long rddCount = 0;
+            for (OffsetRange r : batchOffsets) rddCount += r.count();
+            int partitions = rdd.getNumPartitions();
+            LOG.info("[QuoteStreamingJob] batch 开始: records={}, partitions={}", rddCount, partitions);
+
+            // ============================================================
+            // 1. ODS 层: 原始 JSON → HDFS
+            // ============================================================
             SparkSession spark = SparkSession.builder()
                     .sparkContext(rdd.context())
                     .getOrCreate();
-            Dataset<Row> rawDF = spark.createDataFrame(
-                    rdd.map(r -> {
-                        String json = r.value();
-                        String td = parseTradeDate(json);
-                        return new OdsRecord(td, json);
-                    }), OdsRecord.class);
-            rawDF.write()
-                    .mode("append")
-                    .partitionBy("tradeDate")
-                    .json(Config.hdfsUri() + Config.hdfsOdsPath());
-            LOG.info("ODS 归档完成");
+            if (Config.odsEnabled()) {
+                long t1 = System.currentTimeMillis();
+                Dataset<Row> rawDF = spark.createDataFrame(
+                        rdd.map(r -> {
+                            String json = r.value();
+                            String td = parseTradeDate(json);
+                            return new OdsRecord(td, json);
+                        }), OdsRecord.class);
+                rawDF.write()
+                        .mode("append")
+                        .partitionBy("tradeDate")
+                        .json(Config.hdfsUri() + Config.hdfsOdsPath());
+                LOG.info("[QuoteStreamingJob] ODS 完成, elapsed={}ms", System.currentTimeMillis() - t1);
+            }
 
-            // 解析 JSON → StockQuote，过滤脏数据，计算涨跌幅
+            // ============================================================
+            // 2. 解析 + 过滤
+            // ============================================================
+            long t2 = System.currentTimeMillis();
             JavaRDD<StockQuote> parsedRDD = rdd.map(ConsumerRecord::value)
                     .map(QuoteStreamingJob::parseAndCalc)
                     .filter(Objects::nonNull)
                     .filter(q -> q.getCode() != null && !q.getCode().isEmpty())
                     .filter(q -> q.getName() != null && !q.getName().isEmpty())
                     .filter(q -> q.getPrice() > 0)
-                    .filter(q -> q.getPrevClose() > 0)
-                    .cache();
+                    .filter(q -> q.getPrevClose() > 0);
+
+            final String filterDate = targetDate;
+            if (filterDate != null) {
+                parsedRDD = parsedRDD.filter(q -> filterDate.equals(q.getTradeDate()));
+            }
+            parsedRDD = parsedRDD.cache();
 
             try {
+                long validCount = parsedRDD.count();
                 if (parsedRDD.isEmpty()) {
-                    LOG.info("本批次无有效数据");
+                    LOG.info("[QuoteStreamingJob] 本批次无有效数据, 提交 offset (空批次)");
+                    OffsetRange[] off = ((HasOffsetRanges) rdd.rdd()).offsetRanges();
+                    ((CanCommitOffsets) stream.inputDStream()).commitAsync(off,
+                            (o, ex) -> {
+                                if (ex != null) LOG.error("[QuoteStreamingJob] offset 提交失败: {}", ex.getMessage());
+                            });
                     return;
                 }
+                LOG.info("[QuoteStreamingJob] 解析完成: raw={}, valid={}, elapsed={}ms",
+                        rddCount, validCount, System.currentTimeMillis() - t2);
 
-                // 打印示例
+                // 样本日志
                 List<StockQuote> sample = parsedRDD.take(3);
-                sample.forEach(q -> LOG.info("收到行情: {}", q));
+                if (LOG.isDebugEnabled()) {
+                    sample.forEach(q -> LOG.debug("[QuoteStreamingJob] 样本: {}", q));
+                }
 
                 Dataset<Row> quoteDF = spark.createDataFrame(parsedRDD, StockQuote.class);
 
-                // dim_stock —— 新股票代码
+                // ---- 2a. 维表 ----
                 DimWriter.updateDimStock(spark, quoteDF);
 
-                // 市场数据 —— Redis 实时缓存 + MySQL 归档
+                // ---- 2b. Redis 实时缓存 ----
                 MarketDataWriter.write(parsedRDD);
 
-                // HDFS DWD 落盘 —— 离线团队的入口
-                quoteDF.write()
-                        .mode("append")
-                        .partitionBy("tradeDate")
-                        .parquet(Config.hdfsUri() + Config.hdfsDwdPath());
-                LOG.info("DWD 落盘完成");
+                // ---- 2c. 实时榜单 ----
+                long tRank = System.currentTimeMillis();
+                RankWriter.update();
+                LOG.info("[QuoteStreamingJob] 榜单更新完成, elapsed={}ms",
+                        System.currentTimeMillis() - tRank);
 
-                // 提交 offset 到 Kafka
+                // ---- 2d. HDFS DWD ----
+                if (Config.dwdEnabled()) {
+                    long tDwd = System.currentTimeMillis();
+                    quoteDF.write()
+                            .mode("append")
+                            .partitionBy("tradeDate")
+                            .parquet(Config.hdfsUri() + Config.hdfsDwdPath());
+                    LOG.info("[QuoteStreamingJob] DWD 完成, elapsed={}ms", System.currentTimeMillis() - tDwd);
+                }
+
+                // ---- 提交 offset（带回调，防止静默失败导致重启后重复消费） ----
                 OffsetRange[] offsetRanges = ((HasOffsetRanges) rdd.rdd()).offsetRanges();
-                ((CanCommitOffsets) stream.inputDStream()).commitAsync(offsetRanges);
+                ((CanCommitOffsets) stream.inputDStream()).commitAsync(offsetRanges,
+                        (offsets, ex) -> {
+                            if (ex != null) {
+                                LOG.error("[QuoteStreamingJob] offset 提交失败: {}", ex.getMessage());
+                            }
+                        });
+
+                LOG.info("[QuoteStreamingJob] batch 完成: totalElapsed={}ms",
+                        System.currentTimeMillis() - batchStart);
+
+                // 更新系统状态（取样本中的日期）
+                String curDate = sample.isEmpty() ? null : sample.get(0).getTradeDate();
+                SystemStatusWriter.markBatch(curDate, System.currentTimeMillis() - batchStart);
+
             } catch (Exception e) {
-                LOG.error("Batch processing failed", e);
+                LOG.error("[QuoteStreamingJob] batch 处理失败", e);
+                SystemStatusWriter.markError("batch: " + e.getMessage());
             } finally {
-                // fix #13: unpersist 放在 finally 中，确保异常时也能释放内存
                 parsedRDD.unpersist();
             }
         });
@@ -183,36 +278,27 @@ public class QuoteStreamingJob {
         }
     }
 
-    /** ODS 层原始归档记录 */
-    public static class OdsRecord implements Serializable {
-        private String tradeDate;
-        private String rawJson;
-
-        public OdsRecord() {}
-
-        public OdsRecord(String tradeDate, String rawJson) {
-            this.tradeDate = tradeDate;
-            this.rawJson = rawJson;
-        }
-
-        public String getTradeDate() { return tradeDate; }
-        public void setTradeDate(String tradeDate) { this.tradeDate = tradeDate; }
-        public String getRawJson() { return rawJson; }
-        public void setRawJson(String rawJson) { this.rawJson = rawJson; }
-    }
-
-    /** 启动 shutdown-monitor 后台线程，从外部调用 ssc.stop 避免 foreachRDD 内死锁 */
+    /**
+     * 启动 shutdown-monitor 守护线程
+     *
+     * 两阶段停止:
+     *   1. foreachRDD 检测到 marker 文件 → flush Redis→MySQL → 设置 shutdownRequested=true → return
+     *   2. 本线程检测到 shutdownRequested → 从外部调用 ssc.stop(true, true) 优雅停止
+     *
+     * 为什么不在 foreachRDD 内直接 stop? Spark 2.4 DStream 的 foreachRDD 在 job 线程
+     * 内执行，调用 ssc.stop() 会尝试等待自身完成 → 死锁。必须由外部线程调用。
+     */
     private static void startShutdownMonitor() {
         Thread monitor = new Thread(() -> {
             while (!shutdownRequested) {
                 try { Thread.sleep(2000); } catch (InterruptedException e) { break; }
             }
             if (streamingContext != null) {
-                LOG.info("shutdown monitor 检测到停止标记, 正在优雅停止 StreamingContext...");
-                streamingContext.stop(true, true);
+                LOG.info("[QuoteStreamingJob] shutdown monitor 检测到停止标记, 正在优雅停止...");
+                streamingContext.stop(true, true); // stopSparkContext=true, stopGracefully=true
             }
         }, "shutdown-monitor");
-        monitor.setDaemon(true);
+        monitor.setDaemon(true); // JVM 退出时自动终止
         monitor.start();
     }
 

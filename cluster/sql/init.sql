@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS ads_stock_rank (
     rank_no     INT           NOT NULL            COMMENT '排名',
     score       DECIMAL(12,4) NOT NULL            COMMENT '排序分值: change_pct 或 amount 或 quant_score',
     stat_time   DATETIME      NOT NULL            COMMENT '统计批次时间',
+    UNIQUE KEY uk_rank_type_code_time (rank_type, code, stat_time),
     INDEX idx_rank_type_time (rank_type, stat_time),
     INDEX idx_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='榜单快照——Spark 每 5 分钟写入一批';
