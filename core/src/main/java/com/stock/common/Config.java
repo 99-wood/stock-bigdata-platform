@@ -46,7 +46,11 @@ public final class Config {
     }
 
     private static int getInt(String key) {
-        return Integer.parseInt(get(key));
+        String value = get(key);
+        if (value == null) {
+            throw new IllegalStateException("Missing required config: " + key);
+        }
+        return Integer.parseInt(value);
     }
 
     // ==================== Kafka ====================
@@ -73,4 +77,25 @@ public final class Config {
     // ==================== Streaming ====================
     public static int batchDurationSeconds() { return getInt("streaming.batch.duration.seconds"); }
     public static int minuteWindowSeconds() { return getInt("streaming.minute.window.seconds"); }
+
+    // ==================== Redis Pipeline ====================
+    public static boolean redisPipelineEnabled() { return Boolean.parseBoolean(get("redis.pipeline.enabled")); }
+
+    // ==================== Feature Toggles ====================
+    /** HDFS ODS 原始 JSON 归档，默认 true */
+    public static boolean odsEnabled() { return !"false".equalsIgnoreCase(get("feature.ods.enabled")); }
+    /** HDFS DWD Parquet 落盘，默认 true */
+    public static boolean dwdEnabled() { return !"false".equalsIgnoreCase(get("feature.dwd.enabled")); }
+    /** 实时榜单 Redis ZSet + MySQL，默认 true */
+    public static boolean rankEnabled() { return !"false".equalsIgnoreCase(get("feature.rank.enabled")); }
+    /** 市场概览 MySQL 归档（每 batch），默认 true */
+    public static boolean marketEnabled() { return !"false".equalsIgnoreCase(get("feature.market.enabled")); }
+    /** 分钟线 flush → MySQL dws_stock_minute（日清/shutdown），默认 true */
+    public static boolean minuteFlushEnabled() { return !"false".equalsIgnoreCase(get("feature.flush.minute.enabled")); }
+    /** 日线 flush → MySQL dws_stock_day（日清/shutdown），默认 true */
+    public static boolean dailyFlushEnabled() { return !"false".equalsIgnoreCase(get("feature.flush.daily.enabled")); }
+    /** 启动时 FLUSHDB 清空 Redis，默认 true */
+    public static boolean flushdbOnStart() { return !"false".equalsIgnoreCase(get("feature.redis.flushdb.onstart")); }
+    /** 分钟 OHLCV 写入 Redis，默认 true */
+    public static boolean minuteEnabled() { return !"false".equalsIgnoreCase(get("feature.minute.enabled")); }
 }

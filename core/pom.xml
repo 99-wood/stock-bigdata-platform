@@ -19,7 +19,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <scala.binary.version>2.11</scala.binary.version>
         <spark.version>2.4.0</spark.version>
-        <jackson.version>2.9.10</jackson.version>
+        <jackson.version>2.6.7</jackson.version>
     </properties>
 
     <dependencies>
@@ -67,6 +67,11 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
+            <version>1.7.25</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
             <version>1.7.25</version>
         </dependency>
     </dependencies>

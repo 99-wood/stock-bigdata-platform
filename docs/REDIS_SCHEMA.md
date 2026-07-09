@@ -1,232 +1,297 @@
 # Redis Schema — 股票大数据平台
 
-> **版本**: v1.1  
-> **状态**: 以 platform-web API 端实际 DTO 为准  
-> **更新**: 2026-07-02  
+> **版本**: v2.5 | **更新**: 2026-07-07
 
 ---
 
 ## 1. 概述
 
-Redis 作为实时数据缓存层，承载以下数据：
+Redis（`mid:6379`）作为实时数据缓存层，承载市场概览、个股行情、排行、告警和系统状态五类数据。
 
-- 市场概览（每批次更新）
-- 个股实时行情（逐笔更新）
-- 涨跌 / 成交额 / 量化排行（每 5 分钟刷新）
-- 告警事件（最新 N 条）
-
-所有 key 均位于同一 Redis 实例（`mid:6379`），使用 `stock:` 命名空间。
-
-> ⚠️ **name 不存 Redis**：股票名称不是实时变动数据，Redis 中不存储 `name` 字段。
-> 前端需要展示名称时，用 `code` 去 MySQL `dim_stock` 表查询。
-
----
-
-## 2. 命名规范
-
-```
-stock:{category}:{subcategory}
-stock:{category}:{identifier}
-```
-
-| 规则 | 说明 |
+| 约定 | 说明 |
 |------|------|
-| 分隔符 | `:` 冒号 |
-| 股票代码格式 | `sh600519` / `sz000001` / `bj430047`（小写） |
-| 数字字段 | JSON String 中保持原生类型（double / int / long），Hash 中以字符串存储 |
+| Key 前缀 | `stock:` |
+| name 存储 | `stock:quote:ohlcv:{code}` 中存 name，`stock:quote:{code}` 中不存 |
+| 数字格式 | Hash 以字符串存储；JSON 中 price/change 保留 2 位小数，volume 为整数 |
 
 ---
 
-## 3. Key 定义
+## 2. Key 一览
 
-### 3.1 市场概览 — `stock:market:summary`
+| # | Redis Key | 类型 | 写入方 | 状态 |
+|---|-----------|------|--------|------|
+| 3.1 | `stock:market:summary` | Hash | Spark Streaming → `MarketDataWriter` | ✅ 已实现 |
+| 3.2 | `stock:quote:ohlcv:{code}` | String (JSON) | Spark Streaming → `MarketDataWriter` | ✅ 已实现 |
+| 3.2.1 | `stock:quote:ohlcv:codes` | Set | Lua `redis_ohlcv_upsert.lua` → `SADD` | ✅ 已实现 |
+| 3.3 | `stock:quote:{code}` | String (JSON) | data_gen | ✅ 已由 data_gen 写入 |
+| 3.4 | `stock:minute:{code}:{minuteTime}` | Hash | Spark Streaming → `MarketDataWriter` | ✅ 已实现 |
+| 3.5 | `stock:minute:codes:{minuteTime}` | Set | Spark Streaming → `MarketDataWriter` | ✅ 已实现 |
+| 3.6 | `stock:minute:windows` | Set | Spark Streaming → `MarketDataWriter` | ✅ 已实现 |
+| 3.7 | `stock:rank:up` / `stock:rank:amount` | ZSET | Spark Streaming → `RankWriter` | ✅ 已实现 |
+| 3.7.1 | `stock:rank:quant` | ZSET | Spark 离线任务 | ❌ 待开发 |
+| 3.8 | `stock:alert:latest` | List (JSON) | Spark Streaming | ❌ 待开发 |
+| 3.9 | `stock:system:status` | Hash | Spark Streaming → `SystemStatusWriter` | ✅ 已实现 |
+
+---
+
+## 3. Key 详细定义
+
+### 3.1 市场概览 — `stock:market:summary` ✅
+
+**基本属性**
 
 | 属性 | 值 |
 |------|-----|
-| **类型** | Hash |
-| **写入方** | Spark Streaming Consumer（实时计算，每批次 HSET） |
-| **读取方** | platform-web API → `MarketSummaryDTO` |
-| **TTL** | 无（持续覆盖） |
-| **MySQL 对应表** | `ads_market_summary` |
+| 类型 | Hash |
+| 写入方 | `MarketDataWriter` → `redis_ohlcv_upsert.lua` |
+| 读取方 | `MarketSummaryDTO` |
+| TTL | 无（持续覆盖，每日归零） |
+| MySQL 对应 | `ads_market_summary` |
 
-**Hash Fields:**
+**Hash Fields**
 
 | Field | 类型 | 示例 | 说明 |
 |-------|------|------|------|
-| `stat_time` | string | `2026-07-02 14:30:00` | 统计批次时间 |
-| `total_stocks` | int | `4521` | 有效股票总数 |
-| `up_count` | int | `2180` | 上涨家数（change_pct > 0） |
-| `down_count` | int | `2015` | 下跌家数（change_pct < 0） |
-| `flat_count` | int | `326` | 平盘家数（change_pct = 0） |
-| `avg_change_pct` | double | `0.38` | 平均涨跌幅 % |
-| `total_volume` | long | `384920100` | 全市场总成交量（手） |
-| `total_amount` | double | `5238491200.50` | 全市场总成交额（万元） |
+| `stat_date` | string | `2026-07-03` | 统计日期，日清判断依据 |
+| `stat_time` | string | `2026-07-03 14:30:00` | 最后更新批次时间 |
+| `total_stocks` | int | `5205` | 当日出现过的不重复股票数 |
+| `up_count` | int | `3215` | 上涨家数（change_pct > 0） |
+| `down_count` | int | `1844` | 下跌家数（change_pct < 0） |
+| `flat_count` | int | `146` | 平盘家数（change_pct = 0） |
+| `avg_change_pct` | double | `0.88` | 平均涨跌幅（%） |
+| `total_volume` | long | `89283109059` | 全市场当日累计成交量（股） |
+| `total_amount` | double | `2052802240478.05` | 全市场当日累计成交额（元） |
+| `_sum_pct` | double | — | ⚠️ 内部字段：涨跌幅累加值，前端不读 |
 
-**写入示例 (Redis CLI):**
+**更新机制**
+
+Lua 脚本 `redis_ohlcv_upsert.lua` 原子增量更新：
+1. 每只股票 `EVALSHA` 执行：GET 旧值 → 比较 sign/volume/amount → `HINCRBY`/`HINCRBYFLOAT` 增量 → `HSET stat_time`
+2. 日清：每 batch 前 Driver 检查 `stat_date`，变化时 `DEL` 整个 Hash 重新累加
+3. 跨天 batch（`distinct trade_date > 1`）：DEL + 跳过本 batch
+
 ```
-HSET stock:market:summary stat_time "2026-07-02 14:30:00" total_stocks 4521 up_count 2180 down_count 2015 flat_count 326 avg_change_pct 0.38 total_volume 384920100 total_amount 5238491200.50
+HSET stock:market:summary stat_date 2026-07-03 stat_time "2026-07-03 14:30:00" \
+  total_stocks 5205 up_count 3215 down_count 1844 flat_count 146 \
+  avg_change_pct 0.88 total_volume 89283109059 total_amount 2052802240478.05
 ```
 
 ---
 
-### 3.2 个股实时行情 — `stock:quote:{code}`
+### 3.2 个股 OHLCV 行情 — `stock:quote:ohlcv:{code}` ✅
+
+**基本属性**
 
 | 属性 | 值 |
 |------|-----|
-| **类型** | String (JSON) |
-| **写入方** | Spark Streaming Consumer（从 Kafka 消费行情数据） |
-| **读取方** | platform-web API → `StockLatestDTO` |
-| **TTL** | 无（持续覆盖；可考虑收盘后保留 24h） |
+| 类型 | String (JSON) |
+| 写入方 | `MarketDataWriter` → `redis_ohlcv_upsert.lua` |
+| 读取方 | platform-web API（待对接） |
+| TTL | 无（每批次 SET 覆盖） |
+| MySQL 对应 | `dws_stock_day` / `dws_stock_minute` |
 
-**当前 JSON Schema（v1 — Level-2 五档）:**
+**JSON Schema**
+
+```json
+{
+  "name":       "浦发银行",  // 股票名称
+  "price":      8.67,        // 最新成交价（元）
+  "open":       8.69,        // 今开盘（元）
+  "high":       8.82,        // 今日最高（元）
+  "low":        8.66,        // 今日最低（元）
+  "volume":     39890562,    // 当日累计成交量（股）
+  "amount":     348271497.00,// 当日累计成交额（元）
+  "change":     -0.03,       // 涨跌额（元）= price - prev_close
+  "change_pct": -0.34,       // 涨跌幅（%）
+  "trade_date": "2026-07-03",// 行情日期 yyyy-MM-dd
+  "trade_time": "11:29:17"   // 行情时间 HH:mm:ss
+}
+```
+
+**字段说明**
+
+| 字段 | 类型 | 来源 |
+|------|------|------|
+| `name` | string | `StockQuote.name` |
+| `price` | number (2 位小数) | `StockQuote.price` |
+| `open` | number (2 位小数) | `StockQuote.open` |
+| `high` | number (2 位小数) | `StockQuote.high` |
+| `low` | number (2 位小数) | `StockQuote.low` |
+| `volume` | long (整数) | `StockQuote.volume` |
+| `amount` | number (2 位小数) | `StockQuote.amount` |
+| `change` | number (2 位小数) | 消费端计算 |
+| `change_pct` | number (2 位小数) | 消费端计算 |
+| `trade_date` | string | `StockQuote.tradeDate` |
+| `trade_time` | string | `StockQuote.tradeTime` |
+
+> ⚠️ **code 不在 JSON 内**，从 key 中提取。`stock:quote:ohlcv:sh600519` → `code = "sh600519"`
+>
+> ⚠️ **与 3.3 的区别**：本 key 存 OHLCV，`stock:quote:{code}` 存 Level-2 盘口，来源不同、互不覆盖。
+
+**写入示例**
+```
+SET stock:quote:ohlcv:sh600000 '{"price":8.67,"open":8.69,"high":8.82,"low":8.66,"volume":39890562,"amount":348271497.00,"change":-0.03,"change_pct":-0.34,"trade_date":"2026-07-03","trade_time":"11:29:17"}'
+```
+
+### 3.2.1 OHLCV 代码集合 — `stock:quote:ohlcv:codes` ✅
+
+| 属性 | 值 |
+|------|-----|
+| 类型 | Set（member=code） |
+| 写入方 | `redis_ohlcv_upsert.lua` → `SADD` |
+| 用途 | flush/清理/RankWriter 遍历所有 OHLCV code，替代 `KEYS *` 阻塞 Redis |
+
+```
+SMEMBERS stock:quote:ohlcv:codes
+→ sh600000, sh600001, sh600004, ...
+```
+
+---
+
+
+### 3.3 个股盘口行情 — `stock:quote:{code}`（Level-2 五档）
+
+**基本属性**
+
+| 属性 | 值 |
+|------|-----|
+| 类型 | String (JSON) |
+| 写入方 | data_gen（直接写 Redis） |
+| 读取方 | `StockLatestDTO` |
+| TTL | 无（持续覆盖） |
 
 ```json
 {
   "trade_date": "2026-07-02",
   "trade_time": "14:30:00",
-  "bid": 1850.50,
-  "ask": 1851.00,
-  "b1_v": "100",
-  "b1_p": "1850.50",
-  "b2_v": "200",
-  "b2_p": "1850.00",
-  "b3_v": "300",
-  "b3_p": "1849.50",
-  "b4_v": "150",
-  "b4_p": "1849.00",
-  "b5_v": "500",
-  "b5_p": "1848.00",
-  "s1_v": "80",
-  "s1_p": "1851.00",
-  "s2_v": "120",
-  "s2_p": "1852.00",
-  "s3_v": "200",
-  "s3_p": "1853.00",
-  "s4_v": "100",
-  "s4_p": "1855.00",
-  "s5_v": "300",
-  "s5_p": "1856.00",
+  "bid": 1850.50, "ask": 1851.00,
+  "b1_v": "100", "b1_p": "1850.50",
+  "b2_v": "200", "b2_p": "1850.00",
+  "b3_v": "300", "b3_p": "1849.50",
+  "b4_v": "150", "b4_p": "1849.00",
+  "b5_v": "500", "b5_p": "1848.00",
+  "s1_v": "80",  "s1_p": "1851.00",
+  "s2_v": "120", "s2_p": "1852.00",
+  "s3_v": "200", "s3_p": "1853.00",
+  "s4_v": "100", "s4_p": "1855.00",
+  "s5_v": "300", "s5_p": "1856.00",
   "status": "00"
 }
 ```
 
-**字段说明:**
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `trade_date` | string | ✅ | 交易日期 `yyyy-MM-dd` |
+| `trade_time` | string | ✅ | 交易时间 `HH:mm:ss` |
+| `bid` | number | ✅ | 买一价 |
+| `ask` | number | ✅ | 卖一价 |
+| `b1_v` ~ `b5_v` | string | | 买一~五档量（手） |
+| `b1_p` ~ `b5_p` | string | | 买一~五档价 |
+| `s1_v` ~ `s5_v` | string | | 卖一~五档量（手） |
+| `s1_p` ~ `s5_p` | string | | 卖一~五档价 |
+| `status` | string | | 状态码，`00`=正常 |
 
-| 字段 | JSON 类型 | Java 类型 | 必填 | 说明 |
-|------|----------|----------|------|------|
-| `trade_date` | string | String | ✅ | 交易日期 `yyyy-MM-dd` |
-| `trade_time` | string | String | ✅ | 交易时间 `HH:mm:ss` |
-| `bid` | number | Double | ✅ | 买一价 |
-| `ask` | number | Double | ✅ | 卖一价 |
-| `b1_v` ~ `b5_v` | string | String | | 买一~五档量（手） |
-| `b1_p` ~ `b5_p` | string | String | | 买一~五档价 |
-| `s1_v` ~ `s5_v` | string | String | | 卖一~五档量（手） |
-| `s1_p` ~ `s5_p` | string | String | | 卖一~五档价 |
-| `status` | string | String | | 状态码，`00`=正常 |
-
-> ⚠️ **code 不在 JSON 内**：code 从 Redis key 中提取。
-> 例如 `stock:quote:sh600519` → `code = "sh600519"`，由 `RedisService` set 到 DTO 上。
-
-**📐 扩展规划（v2 — Level-1 OHLCV 兼容字段）:**
-
-为兼容日线分析、K 线图等场景，后续可在 JSON 中**追加**以下可选字段（向后兼容，旧字段不动）：
-
-```json
-{
-  "...以上 v1 字段保留...": "",
-  "price": 1850.50,            // 新增: 当前价（= bid）
-  "open": 1845.00,             // 新增: 开盘价
-  "high": 1855.00,             // 新增: 最高价
-  "low": 1842.00,              // 新增: 最低价
-  "pre_close": 1846.00,        // 新增: 前收盘价
-  "volume": 12345678,          // 新增: 累计成交量（手）
-  "amount": 22849365000.00,    // 新增: 累计成交额（万元）
-  "change": 4.50,              // 新增: 涨跌额
-  "change_pct": 0.2438         // 新增: 涨跌幅 %
-}
-```
-
-> Jackson 默认忽略未知字段，新增字段不会破坏现有反序列化。
-> 写入方可按数据源能力逐步追加，读取方 `StockLatestDTO` 按需添加对应 getter。
+> 📐 后续可追加 OHLCV 字段（price/open/high/low/volume/amount/change_pct），Jackson 默认忽略未知字段，向后兼容。
 
 ---
 
-### 3.3 涨幅排行 — `stock:rank:up`
-
-| 属性 | 值 |
-|------|-----|
-| **类型** | Sorted Set (ZSET) |
-| **写入方** | Spark 离线任务（每 5 分钟 ZADD 一批） |
-| **读取方** | platform-web API → `RankItemDTO`（ZRANGE / ZREVRANGE 取 Top N） |
-| **TTL** | 无（每批次全量替换: DEL + ZADD） |
-
-**ZSET 结构:**
-- **member**: 股票代码（如 `sh600519`）
-- **score**: `change_pct`（涨跌幅，double），正值为上涨
-
-**读取命令:**
-```
-ZREVRANGE stock:rank:up 0 19 WITHSCORES
-```
-
-> 每 5 分钟全量刷新：`DEL stock:rank:up` → `ZADD stock:rank:up 2.5 sh600519 1.8 sz000001 ...`
-
 ---
 
-### 3.4 跌幅排行 — `stock:rank:down`
+### 3.4 分钟 OHLCV — `stock:minute:{code}:{minuteTime}` ✅
+
+**基本属性**
 
 | 属性 | 值 |
 |------|-----|
-| **类型** | Sorted Set (ZSET) |
-| **写入方** | Spark 离线任务（每 5 分钟） |
-| **读取方** | platform-web API → `RankItemDTO`（ZRANGE 取跌幅最大） |
-| **TTL** | 无（每批次全量替换） |
+| 类型 | Hash |
+| 写入方 | `MarketDataWriter` → `redis_minute_upsert.lua` |
+| 读取方 | flush 时 → MySQL `dws_stock_minute` |
+| TTL | 无（日清时删除） |
 
-**ZSET 结构:**
-- **member**: 股票代码
-- **score**: `change_pct`（负值越大 = 跌越多）
+**Hash Fields**
 
-**读取命令（取跌幅最大前 20）:**
+| Field | 类型 | 说明 |
+|-------|------|------|
+| `open` | double | 窗口内最早 `tradeTime` 的 price |
+| `high` | double | 窗口内最高 price |
+| `low` | double | 窗口内最低 price |
+| `close` | double | 窗口内最晚 `tradeTime` 的 price |
+| `last_vol` | long | 窗口内最晚快照的当日累计成交量（股） |
+| `last_amt` | double | 窗口内最晚快照的当日累计成交额（元） |
+| `stored_time` | string | 窗口内最晚 `tradeTime`（HH:mm:ss），用于乱序判断 |
+| `trade_date` | string | 交易日期 yyyy-MM-dd |
+
+**设计要点**
+
+- 只存 raw 值，不做 delta。flush 时用 LAG 做差：`vol(N) = last_vol(N) - last_vol(N-1)`
+- Kafka 乱序处理：用 `stored_time` 比较，更晚更新 close/last，更早纠正 open
+- high/low 始终取极值，不受顺序影响
+
 ```
-ZRANGE stock:rank:down 0 19 WITHSCORES
+HGETALL stock:minute:sh600000:2026-07-02 11:30:00
+→ open=8.59 high=8.59 low=8.59 close=8.59 last_vol=44555713 last_amt=387520785
 ```
 
----
-
-### 3.5 成交额排行 — `stock:rank:amount`
+### 3.5 分钟窗口股票索引 — `stock:minute:codes:{minuteTime}` ✅
 
 | 属性 | 值 |
 |------|-----|
-| **类型** | Sorted Set (ZSET) |
-| **写入方** | Spark 离线任务（每 5 分钟） |
-| **读取方** | platform-web API → `RankItemDTO`（ZRANGE / ZREVRANGE 取 Top N） |
-| **TTL** | 无（每批次全量替换） |
+| 类型 | Set（member=code） |
+| 写入方 | `redis_minute_upsert.lua` → `SADD` |
+| 用途 | flush/清理时遍历该窗口所有股票，避免 `KEYS *` 阻塞 Redis |
 
-**ZSET 结构:**
-- **member**: 股票代码
-- **score**: `amount`（成交额，万元）
-
-**读取命令:**
 ```
-ZREVRANGE stock:rank:amount 0 19 WITHSCORES
+SMEMBERS stock:minute:codes:2026-07-02 11:30:00
+→ sh600000, sh600001, sh600004, ...
+```
+
+### 3.6 活跃窗口集合 — `stock:minute:windows` ✅
+
+| 属性 | 值 |
+|------|-----|
+| 类型 | Set（member="yyyy-MM-dd HH:mm:00"） |
+| 写入方 | `redis_minute_upsert.lua` → `SADD` |
+| 用途 | 日清/跨天时遍历所有窗口进行 flush 和清理 |
+
+```
+SMEMBERS stock:minute:windows
+→ 2026-07-02 09:30:00, 2026-07-02 09:35:00, ...
 ```
 
 ---
 
-### 3.6 量化评分排行 — `stock:rank:quant`
+### 3.7 排行榜 — `stock:rank:up` / `stock:rank:amount` ✅
+
+**基本属性**
 
 | 属性 | 值 |
 |------|-----|
-| **类型** | Sorted Set (ZSET) |
-| **写入方** | Spark 离线任务（每 5 分钟 / 每日） |
-| **读取方** | platform-web API → `RankItemDTO`（ZRANGE / ZREVRANGE 取 Top N） |
-| **TTL** | 无（每批次全量替换） |
+| 类型 | ZSET（member=code, score=排序依据值） |
+| 写入方 | Spark Streaming → `RankWriter.update()`（每 batch 全量刷新） |
+| 读取方 | `RankItemDTO` / platform-web API |
+| TTL | 无（`DEL` + `ZADD` 全量替换） |
 
-**ZSET 结构:**
-- **member**: 股票代码
-- **score**: `quant_score`（综合评分 0-100）
+**已实现的 Rank Key**
 
-**量化因子**（4 因子权重来自 `cluster/config/quant-weight.properties`）:
+| Key | score 字段 | 排序方向 | 读命令 |
+|-----|-----------|---------|--------|
+| `stock:rank:up` | `change_pct`（涨跌幅 %） | 高→低 | `ZREVRANGE stock:rank:up 0 19 WITHSCORES` |
+| `stock:rank:amount` | `amount`（成交额，元，来自 `StockQuote.amount`） | 高→低 | `ZREVRANGE stock:rank:amount 0 19 WITHSCORES` |
+
+**实现细节**
+
+- 每 batch 执行：`SMEMBERS stock:quote:ohlcv:codes` → Pipeline `GET` 全量 OHLCV JSON → 提取 change_pct/amount → `DEL` + `ZADD` 逐股写入
+- 跌幅榜：从 `stock:rank:up` 用 `ZRANGE 0 19`（从低到高取负值最大的，不另建 key）
+- ZADD O(log N) 逐股更新，ZREVRANGE O(log N + M) 取 Top 20
+- MySQL 同步：`ads_stock_rank`（REPLACE INTO，每 batch 60 行）
+
+**待实现**
+
+| Key | score 字段 | 说明 |
+|-----|-----------|------|
+| `stock:rank:quant` | `quant_score`（0-100） | 量化评分，依赖 `ads_quant_score` 离线任务 |
+
+量化因子权重（`cluster/config/quant-weight.properties`）：
 
 | 因子 | 权重 | 说明 |
 |------|------|------|
@@ -235,67 +300,214 @@ ZREVRANGE stock:rank:amount 0 19 WITHSCORES
 | volatility | 0.20 | 波动率因子 |
 | relative_strength | 0.15 | 相对强度因子 |
 
-**读取命令:**
-```
-ZREVRANGE stock:rank:quant 0 19 WITHSCORES
-```
-
 ---
 
-### 3.7 告警事件 — `stock:alert:latest`
+### 3.8 告警事件 — `stock:alert:latest` ❌
 
 | 属性 | 值 |
 |------|-----|
-| **类型** | List |
-| **写入方** | Spark Streaming（触发告警时 LPUSH） |
-| **读取方** | platform-web API → `AlertDTO`（LRANGE 取最新 N 条） |
-| **TTL** | 建议保留最近 1000 条（LTRIM 裁剪） |
+| 类型 | List（JSON String） |
+| 写入方 | Spark Streaming（触发告警时 `LPUSH` + `LTRIM`） |
+| 读取方 | `AlertDTO`（`LRANGE 0 49`） |
+| TTL | 保留最近 1000 条 |
 
-**Value (JSON String):**
-
+**JSON**
 ```json
-{
-  "alert_type": "change_pct",
-  "code": "sh600519",
-  "curr_value": 5.23,
-  "threshold": 5.00,
-  "event_time": "2026-07-02 14:30:00"
-}
+{ "alert_type": "change_pct", "code": "sh600519",
+  "curr_value": 5.23, "threshold": 5.00,
+  "event_time": "2026-07-02 14:30:00" }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `alert_type` | string | ✅ | 告警类型：`change_pct` / `volume_surge` / `quant_breakout` |
+| `alert_type` | string | ✅ | `change_pct` / `volume_surge` / `quant_breakout` |
 | `code` | string | ✅ | 股票代码 |
 | `curr_value` | double | ✅ | 当前触发值 |
 | `threshold` | double | ✅ | 触发阈值 |
 | `event_time` | string | ✅ | 事件时间 `yyyy-MM-dd HH:mm:ss` |
 
-**写入命令:**
 ```
 LPUSH stock:alert:latest '{...json...}'
 LTRIM stock:alert:latest 0 999
-```
-
-**读取命令:**
-```
 LRANGE stock:alert:latest 0 49
 ```
 
 ---
 
-## 4. 数据流架构
+### 3.9 系统运行状态 — `stock:system:status` ✅
+
+**基本属性**
+
+| 属性 | 值 |
+|------|-----|
+| 类型 | Hash |
+| 写入方 | `SystemStatusWriter` → `HSET`（每 batch / 关键事件触发） |
+| 读取方 | Dashboard / Debug API |
+| TTL | 无（持续覆盖） |
+
+**Hash Fields — 运行状态**
+
+| Field | 类型 | 示例 | 说明 |
+|-------|------|------|------|
+| `status` | string | `running` | 当前状态: starting / running / flushing / idle / error |
+| `mode` | string | `replay` | 运行模式: normal / replay |
+| `target_date` | string | `2026-07-06` | 目标日期（--date 参数），无则为 `all` |
+| `started_at` | string | `2026-07-07 09:22:00` | Consumer 启动时间 |
+| `uptime_seconds` | int | `14400` | 已运行秒数 |
+| `heartbeat_at` | string | `2026-07-07 14:07:00` | 心跳时间戳（后台线程每 10 秒更新，前端判断存活） |
+
+**Hash Fields — 特性开关（启动时写入，运行时不变）**
+
+| Field | 类型 | 示例 | 说明 |
+|-------|------|------|------|
+| `feature_ods` | string | `true` | HDFS 原始 JSON 归档开关 |
+| `feature_dwd` | string | `true` | HDFS Parquet 落盘开关 |
+| `feature_rank` | string | `true` | 实时榜单开关 |
+| `feature_market` | string | `true` | 市场概览 MySQL 归档开关 |
+| `feature_minute` | string | `true` | 分钟 OHLCV Redis 写入开关 |
+| `feature_flush_minute` | string | `true` | 分钟线 flush → MySQL 开关 |
+| `feature_flush_daily` | string | `true` | 日线 flush → MySQL 开关 |
+| `feature_flushdb` | string | `true` | 启动时 FLUSHDB 开关 |
+
+**Hash Fields — 数据统计（每 batch 更新）**
+
+| Field | 类型 | 示例 | 说明 |
+|-------|------|------|------|
+| `current_date` | string | `2026-07-06` | 当前正在处理的交易日期 |
+| `redis_keys` | int | `275995` | Redis 总 key 数（`DBSIZE`） |
+| `minute_windows` | int | `34` | 当前积累的分钟窗口数 |
+| `ohlcv_codes` | int | `5205` | 已出现的股票代码数 |
+| `rank_up_count` | int | `3789` | 涨幅榜 ZSet 大小 |
+| `rank_amount_count` | int | `3789` | 成交额榜 ZSet 大小 |
+| `batch_count` | long | `2847` | 累计处理的 batch 数 |
+| `batch_ms` | int | `1120` | 最近一个 batch 耗时（毫秒） |
+
+**Hash Fields — 消费进度（每 batch 更新）**
+
+| Field | 类型 | 示例 | 说明 |
+|-------|------|------|------|
+| `consumer_lag` | long | `429000` | Kafka 剩余未消费记录数（每 30 秒更新一次即可） |
+| `consumer_pct` | int | `95` | 消费进度百分比（当前 offset / 总 offset） |
+
+**Hash Fields — flush 进度（flush 期间更新）**
+
+| Field | 类型 | 示例 | 说明 |
+|-------|------|------|------|
+| `flush_windows_done` | int | `45` | 已完成 flush 的窗口数 |
+| `flush_windows_total` | int | `52` | 待 flush 的总窗口数 |
+| `flush_rows` | int | `755280` | 已写入 MySQL 的分钟行数 |
+| `flush_elapsed_sec` | int | `960` | 当前 flush 已用秒数 |
+
+**Hash Fields — 上次事件**
+
+| Field | 类型 | 示例 | 说明 |
+|-------|------|------|------|
+| `last_flush_at` | string | `2026-07-07 13:33:03` | 最近一次 flush 开始时间 |
+| `last_flush_type` | string | `auto` | 最近 flush 类型: auto（日清）/ manual（手动）/ shutdown（关闭） |
+| `last_error` | string | `Rank MySQL 写入失败` | 最近一次错误信息（空字符串=无错误） |
+| `last_error_at` | string | `2026-07-07 13:33:00` | 最近一次错误时间（空字符串=无错误） |
+
+**更新时间戳**
+
+| Field | 类型 | 示例 | 说明 |
+|-------|------|------|------|
+| `updated_at` | string | `2026-07-07 13:49:00` | 此 Hash 最后更新时间 |
+
+**写入时机**
+
+| 事件 | 更新字段 |
+|------|---------|
+| Consumer 启动 | `status`, `mode`, `target_date`, `started_at`, `feature_*`, `updated_at` |
+| 每 batch 结束 | `current_date`, `redis_keys`, `minute_windows`, `ohlcv_codes`, `rank_*_count`, `batch_count`, `batch_ms`, `uptime_seconds`, `updated_at` |
+| flush 开始 | `status=flushing`, `last_flush_at`, `last_flush_type` |
+| flush 结束 | `status=running` |
+| 发生错误 | `last_error`, `last_error_at`（仅记录最近一次） |
 
 ```
-新浪 API → Kafka (raw quotes)
+HSET stock:system:status status running mode replay target_date all \
+  started_at "2026-07-07 09:22:00" uptime_seconds 14400 heartbeat_at "2026-07-07 14:07:00" \
+  feature_ods true feature_dwd true feature_rank true feature_market true \
+  feature_minute true feature_flush_minute true feature_flush_daily true feature_flushdb true \
+  current_date "2026-07-06" redis_keys 275995 minute_windows 34 ohlcv_codes 5205 \
+  rank_up_count 3789 rank_amount_count 3789 batch_count 2847 batch_ms 1120 \
+  consumer_lag 0 consumer_pct 0 \
+  flush_windows_done 0 flush_windows_total 0 flush_rows 0 flush_elapsed_sec 0 \
+  last_flush_at "" last_flush_type "" last_error "" last_error_at "" \
+  updated_at "2026-07-07 13:49:00"
+```
+
+---
+
+## 4. 已实现部分的实现细节
+
+### 4.1 代码位置
+
+| 文件 | 角色 |
+|------|------|
+| `core/.../streaming/MarketDataWriter.java` | 实时写入：日清/跨天检查 + Pipeline Lua EVALSHA → Redis + MySQL 市场概览 |
+| `core/.../batch/MarketFlusher.java` | 持久化：分钟 LAG + 日线 flush → MySQL `dws_stock_minute` / `dws_stock_day` + key 清理 |
+| `core/.../streaming/RankWriter.java` | 实时榜单：Redis ZSet 排名 + MySQL `ads_stock_rank` 写入 |
+| `core/.../common/RedisKeys.java` | 统一 Redis key 常量（含 OHLCV 跟踪 SET `OHLCV_CODES`） |
+| `core/.../common/LuaScriptManager.java` | Lua 脚本加载 + SHA 缓存管理 |
+| `core/src/main/resources/redis_ohlcv_upsert.lua` | 日线 OHLCV + 市场汇总 Lua 原子更新（维护 `stock:quote:ohlcv:codes` SET） |
+| `core/src/main/resources/redis_minute_upsert.lua` | 分钟 OHLCV raw 值记录，乱序处理 |
+| `core/.../streaming/QuoteStreamingJob.java` | 入口：调用 `MarketDataWriter.write()` + `RankWriter.update()` + shutdown flush |
+| `core/.../batch/FlushJob.java` | 独立 flush 任务（daily-replay / full-replay 最后一步） |
+| `core/.../streaming/SystemStatusWriter.java` | 系统状态写入：markStartup / markBatch / markFlush 进度 / markError |
+
+**辅助类**
+
+| 文件 | 角色 |
+|------|------|
+| `core/.../common/RedisUtil.java` | Jedis 连接工厂 |
+| `core/.../common/JdbcUtil.java` | JDBC 驱动 + 连接管理 |
+| `core/.../common/StockQuote.java` | Kafka 消息 POJO |
+| `core/.../common/Config.java` | 配置加载 |
+
+### 4.2 Lua 脚本流程
+
+```
+EVALSHA → CJSON 解析新 JSON
+        → GET 旧 JSON
+        → 旧 == nil: total_stocks+1, up/down/flat 对应+1, sum/volume/amount 直接加
+        → 旧 ≠ nil: sign 变则调计数, volume/amount/sum 做 delta
+        → SET 新快照, HSET stat_time
+        → avg_change_pct = _sum_pct / total_stocks
+```
+
+### 4.3 日清 + Flush
+
+- 触发：Driver 侧每 batch 前 `HGET stat_date` ≠ 今日
+- 流程：`flushAll`（分钟 LAG → MySQL + 日线 → MySQL）→ `DEL` Redis → `HSET stat_date`
+- 跨天 batch（`distinct trade_date > 1`）：flushAll + DEL + 跳过
+- shutdown 时：检测 marker 后先 flushAll 再停 StreamingContext
+
+### 4.4 并发安全
+
+- `HINCRBY`/`HINCRBYFLOAT` 是 Redis 原子命令
+- Lua 脚本整体原子执行，单 key 读-改-写不被打断
+- 不同 stock 数据完全独立
+- EVALSHA（首次 SCRIPT LOAD，Redis 重启后 NOSCRIPT → 回退 EVAL → 重新 LOAD）
+
+---
+
+## 5. 数据流
+
+```
+新浪 API → Kafka(stock_quote_raw)
                │
                ▼
-      Spark Streaming Consumer
+      Spark Streaming Consumer (QuoteStreamingJob)
                │
-       ┌───────┼────────┐
-       ▼       ▼        ▼
-    Redis   MySQL    HDFS
-  (实时)   (兜底)   (离线)
+       ┌───────┼────────┬───────────┐
+       ▼       ▼        ▼           ▼
+    Redis   MySQL     HDFS       Kafka OA
+  (实时)   dim_stock (DWD Parquet) (offset)
+       │
+       ├── RankWriter: ZADD → stock:rank:up / stock:rank:amount (每 batch)
+       │
+       │   日清/Shutdown:
+       │   MarketFlusher → MySQL dws_stock_minute (LAG) + dws_stock_day
        │
        ▼
   platform-web API
@@ -304,43 +516,30 @@ LRANGE stock:alert:latest 0 49
    前端 Dashboard
 ```
 
-| 数据 | Redis（实时） | MySQL（兜底/历史） |
-|------|-------------|-----------------|
-| 市场概览 | `stock:market:summary` (Hash) | `ads_market_summary` |
-| 个股行情 | `stock:quote:{code}` (JSON) | `dws_stock_day` / `dws_stock_minute` |
-| 排行 | `stock:rank:*` (ZSET) | `ads_stock_rank` |
-| 量化 | `stock:rank:quant` (ZSET) | `ads_quant_score` |
-| 告警 | `stock:alert:latest` (List) | （暂无 MySQL 表，后续补充） |
+| 数据 | Redis | MySQL |
+|------|-------|-------|
+| 市场概览 | ✅ `stock:market:summary` (Hash) | `ads_market_summary` |
+| 个股 OHLCV | ✅ `stock:quote:ohlcv:{code}` (JSON) | `dws_stock_day` |
+| 分钟 OHLCV | ✅ `stock:minute:{code}:{minuteTime}` (Hash) | `dws_stock_minute` |
+| 个股盘口 | ✅ `stock:quote:{code}` (JSON) | — |
+| 排行 | ✅ `stock:rank:up` / `stock:rank:amount` (ZSET) | `ads_stock_rank` |
+| 量化 | ❌ `stock:rank:quant` (ZSET) | `ads_quant_score` |
+| 系统状态 | ✅ `stock:system:status` (Hash) | — |
+| 告警 | ❌ `stock:alert:latest` (List) | — |
 
 ---
 
-## 5. 前后端对齐状态
+## 6. DTO 对齐
 
-| DTO | Schema 匹配 | 备注 |
-|-----|-----------|------|
-| `StockLatestDTO` | ✅ 匹配 | Level-2 五档（bid/ask/b1_p~b5_p/s1_p~s5_p），code 从 key 提取 |
-| `MarketSummaryDTO` | ✅ 匹配 | `totalAmount` 已改为 `Double`，匹配数据源 |
-| `RankItemDTO` | ✅ 匹配 | bid/ask/tradeDate/tradeTime/score/status，score 来自 ZSET |
-| `AlertDTO` | ✅ 匹配 | alert_type/code/name/curr_value/threshold/event_time |
+| DTO | 对应 Redis Key | 读取方式 |
+|-----|---------------|---------|
+| `MarketSummaryDTO` | `stock:market:summary` | `HGETALL` |
+| `StockLatestDTO` | `stock:quote:{code}` | `GET` + key 中提取 code |
+| `RankItemDTO` | `stock:rank:*` | `ZREVRANGE` / `ZRANGE` WITHSCORES |
+| `AlertDTO` | `stock:alert:latest` | `LRANGE 0 49` |
+| `SystemStatusDTO` (TBD) | `stock:system:status` | `HGETALL` |
 
----
-
-## 6. 对接指引（给 Spark Streaming 写入方）
-
-写入方（PR #9 或后续任务）需要按本文档定义的 Key 和数据结构写入 Redis：
-
-| 数据 | Redis Key | 数据结构 | 写入命令 |
-|------|----------|---------|---------|
-| 市场概览 | `stock:market:summary` | Hash（8 字段） | `HSET` |
-| 个股行情 | `stock:quote:{code}` | JSON String（Level-2 五档） | `SET` |
-| 涨幅排行 | `stock:rank:up` | ZSET（member=code, score=change_pct） | `DEL` + `ZADD` 全量刷新 |
-| 跌幅排行 | `stock:rank:down` | ZSET（member=code, score=change_pct） | `DEL` + `ZADD` 全量刷新 |
-| 成交额排行 | `stock:rank:amount` | ZSET（member=code, score=amount） | `DEL` + `ZADD` 全量刷新 |
-| 量化排行 | `stock:rank:quant` | ZSET（member=code, score=quant_score） | `DEL` + `ZADD` 全量刷新 |
-| 告警 | `stock:alert:latest` | List（JSON String） | `LPUSH` + `LTRIM` |
-
-> ⚠️ **重要**: 写入方必须严格对齐本文档的 JSON 字段名（包括 snake_case 的 `@JsonProperty` 名称），
-> 否则 API 端反序列化后字段为 null。
+> `stock:quote:ohlcv:{code}` 暂未对接 API，需新增 DTO 或在现有 DTO 追加字段。
 
 ---
 
@@ -348,5 +547,12 @@ LRANGE stock:alert:latest 0 49
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
-| 2026-07-02 | v1.1 | 以 platform-web DTO 为准重写 §3.2（Level-2 五档），新增扩展规划、对接指引 |
+| 2026-07-07 | v2.5 | §3.9 新增 8 个 feature_* 开关字段、heartbeat_at 心跳字段；修正 §3.9 状态为 ✅；更新写入时机和示例 |
+| 2026-07-07 | v2.4 | §3.9 SystemStatus 状态→✅；§3.1-3.2 写入方修正为 MarketDataWriter；修正所有 volume/amount 单位（股/元）；§4.1/§5 状态同步 |
+| 2026-07-07 | v2.3 | 新增 §3.9 `stock:system:status` 系统运行状态 Hash，§4.1 加入 SystemStatusWriter，§5-6 更新 |
+| 2026-07-07 | v2.2 | 新增 §3.2.1 OHLCV 跟踪 SET、§3.7 RankWriter 实时榜单 ✅、§4.1 代码拆分、§5 数据流更新；consumer 启动 FLUSHDB |
+| 2026-07-06 | v2.1 | 新增 §3.4-3.6 分钟 OHLCV key，RedisWriter→MarketDataWriter，日清加 LAG flush，集群脚本优化 |
+| 2026-07-03 | v2.0 | 全文重构：统一 Key 格式、标注实现状态、合并排行章节、拆分已实现细节、精简 DTO 对齐、新增 Key 一览表 |
+| 2026-07-03 | v1.2 | 新增 `stock:quote:ohlcv:{code}` + stat_date/_sum_pct 字段 + Lua 机制说明 |
+| 2026-07-02 | v1.1 | 以 platform-web DTO 为准重写 §3.2（Level-2 五档） |
 | 2026-07-02 | v1.0 | 初始版本，定义全部 7 类 Key 的 schema |
