@@ -235,7 +235,7 @@ async function fetchTreemap() {
   } catch {}
 }
 fetchTreemap()
-setInterval(fetchTreemap, 30000)
+const treemapTimer = setInterval(fetchTreemap, 30000)
 
 onMounted(() => {
   store.fetchAll()
@@ -267,6 +267,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearInterval(treemapTimer)
   disconnectWebSocket()
   store.wsConnected = false
   trendChart?.dispose()
