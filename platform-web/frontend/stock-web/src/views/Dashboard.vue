@@ -326,7 +326,7 @@ onUnmounted(() => {
   flex-direction: row;
 }
 .rb-anomaly {
-  flex: 3;
+  flex: 4;
   min-width: 0;
   overflow: hidden;
 }

@@ -425,50 +425,72 @@ public class RedisService {
                 .collect(Collectors.toList());
     }
 
-    /** 内存缓存：全量 spark 数据 + 缓存时间戳，30s 过期 */
+    /** 内存缓存：全量 spark 数据 + 时间轴 + 缓存时间戳，30s 过期 */
     private volatile Map<String, List<Double>> sparkCache;
+    private volatile List<String> sparkTimes;
     private volatile long sparkCacheTime;
 
-    /** Batch sparkline: hit in-memory cache (30s TTL), compute on miss. */
-    public Map<String, List<Double>> getSparkBatch(List<String> codes) {
+    /** Batch sparkline: returns { "times": [...], "data": { code: [...] } }. */
+    public Map<String, Object> getSparkBatch(List<String> codes) {
         // 1. 命中缓存：直接返回
         Map<String, List<Double>> cached = sparkCache;
-        if (cached != null && System.currentTimeMillis() - sparkCacheTime < 30_000) {
-            Map<String, List<Double>> result = new LinkedHashMap<>();
+        List<String> cachedTimes = sparkTimes;
+        if (cached != null && cachedTimes != null
+                && System.currentTimeMillis() - sparkCacheTime < 30_000) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("times", cachedTimes);
+            Map<String, List<Double>> data = new LinkedHashMap<>();
             for (String code : codes) {
                 List<Double> v = cached.get(code);
-                if (v != null) result.put(code, v);
+                if (v != null) data.put(code, v);
             }
+            result.put("data", data);
             return result;
         }
 
         // 2. 缓存未命中：从 minute hashes 重建
-        Map<String, List<Double>> fresh = computeSparkFromMinutes();
-        sparkCache = fresh;
-        sparkCacheTime = System.currentTimeMillis();
-
-        Map<String, List<Double>> result = new LinkedHashMap<>();
+        computeSparkFromMinutes();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("times", sparkTimes);
+        Map<String, List<Double>> data = new LinkedHashMap<>();
         for (String code : codes) {
-            List<Double> v = fresh.get(code);
-            if (v != null) result.put(code, v);
+            List<Double> v = sparkCache.get(code);
+            if (v != null) data.put(code, v);
         }
+        result.put("data", data);
         return result;
     }
 
-    private Map<String, List<Double>> computeSparkFromMinutes() {
-        Map<String, List<Double>> spark = new LinkedHashMap<>();
+    private void computeSparkFromMinutes() {
+        sparkCache = new LinkedHashMap<>();
+        sparkTimes = new ArrayList<>();
         try {
             Set<String> windows = stringRedisTemplate.opsForSet().members(KEY_MINUTE_WINDOWS);
-            if (windows == null || windows.isEmpty()) return spark;
+            if (windows == null || windows.isEmpty()) return;
             String latestDate = windows.stream()
                     .map(w -> w.substring(0, 10)).max(Comparator.naturalOrder()).orElse(null);
-            if (latestDate == null) return spark;
+            if (latestDate == null) return;
             List<String> sortedWindows = windows.stream()
                     .filter(w -> w.startsWith(latestDate)).sorted().collect(Collectors.toList());
-            if (sortedWindows.isEmpty()) return spark;
+            if (sortedWindows.isEmpty()) return;
+
+            // 压缩时间轴：午休 11:30→13:00 压缩，仅压缩下午时段 (>=210)
+            // 实际: 9:30=0  11:30=120  13:00=210  15:00=330
+            // 压缩后: 9:30=0  11:30=120  13:00=135  15:00=255
+            final int AFTERNOON_START = 210, LUNCH_COMPRESS = 75;
+            sparkTimes = sortedWindows.stream()
+                    .map(w -> {
+                        String t = w.substring(11, 16);
+                        int h = Integer.parseInt(t.substring(0, 2));
+                        int m = Integer.parseInt(t.substring(3, 5));
+                        int mins = (h - 9) * 60 + (m - 30);
+                        if (mins < 0) mins = 0;
+                        if (mins >= AFTERNOON_START) mins -= LUNCH_COMPRESS;
+                        return String.valueOf(mins);
+                    }).collect(Collectors.toList());
 
             Set<String> allCodes = stringRedisTemplate.opsForSet().members(KEY_OHLCV_CODES);
-            if (allCodes == null || allCodes.isEmpty()) return spark;
+            if (allCodes == null || allCodes.isEmpty()) return;
 
             List<String> codeOrder = new ArrayList<>();
             List<Object> pipeResults = stringRedisTemplate.executePipelined(
@@ -487,16 +509,25 @@ public class RedisService {
             for (int i = 0; i < codeOrder.size() && i < pipeResults.size(); i++) {
                 Object v = pipeResults.get(i);
                 if (v != null) {
-                    spark.computeIfAbsent(codeOrder.get(i), k -> new ArrayList<>())
+                    sparkCache.computeIfAbsent(codeOrder.get(i), k -> new ArrayList<>())
                          .add(Double.parseDouble(v.toString()));
                 }
             }
+            // 截断：某些代码可能因 pipeline 重复获取多于窗口数的数据
+            final int winCount = sortedWindows.size();
+            sparkCache.replaceAll((code, list) -> {
+                if (list.size() > winCount) {
+                    log.warn("Spark cache truncate: {} has {} closes for {} windows", code, list.size(), winCount);
+                    return new ArrayList<>(list.subList(0, winCount));
+                }
+                return list;
+            });
+            sparkCacheTime = System.currentTimeMillis();
             log.info("Spark cache rebuilt: {} stocks × {} windows = {} results",
-                    allCodes.size(), sortedWindows.size(), spark.size());
+                    allCodes.size(), sortedWindows.size(), sparkCache.size());
         } catch (Exception e) {
             log.warn("Spark compute failed: {}", e.getMessage());
         }
-        return spark;
     }
 
     /**

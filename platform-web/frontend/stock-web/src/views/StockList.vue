@@ -8,7 +8,7 @@
           <h2 class="sl-title">STOCK SCANNER</h2>
           <span class="sl-chip">{{ filtered.length }} / {{ all.length }}</span>
         </div>
-        <el-input v-model="search" placeholder="搜索代码..." clearable size="small">
+        <el-input v-model="search" placeholder="搜索代码/名称..." clearable size="small">
           <template #prefix><span class="sl-prompt">&gt;</span></template>
         </el-input>
       </div>
@@ -31,7 +31,7 @@
             <span class="slr-name" :class="getStockColorClass(row)">{{ row.name || row.code }}</span>
             <span class="slr-code" v-if="row.name" :class="getStockColorClass(row)">{{ row.code }}</span>
           </span>
-          <svg v-if="sparkData[row.code]" class="slr-spark" viewBox="0 0 72 20" :stroke="sparkColor(sparkData[row.code])">
+          <svg v-if="sparkData[row.code]" class="slr-spark" viewBox="0 0 72 20" :stroke="sparkColor(row)">
             <path :d="sparkPath(sparkData[row.code])" fill="none" stroke-width="1.2" />
           </svg>
           <span class="slr-ask">{{ fmtBA(row,'ask') }}</span>
@@ -89,7 +89,9 @@ const selectedCode = computed(() => selected.value?.code ?? null)
 
 const filtered = computed(() => {
   const kw = search.value.trim().toLowerCase()
-  return kw ? all.value.filter(s => s.code?.toLowerCase().includes(kw)) : all.value
+  return kw ? all.value.filter(s =>
+    s.code?.toLowerCase().includes(kw) || s.name?.toLowerCase().includes(kw)
+  ) : all.value
 })
 const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize)))
 const paged = computed(() => filtered.value.slice((page.value-1)*pageSize, page.value*pageSize))
@@ -124,9 +126,12 @@ function sparkPath(closes) {
     return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
   }).join(' ')
 }
-function sparkColor(closes) {
-  if (!closes || closes.length < 2) return 'var(--text-muted)'
-  return closes[closes.length - 1] >= closes[0] ? 'var(--stock-up)' : 'var(--stock-down)'
+function sparkColor(item) {
+  const pct = item.change_pct ?? item.changePct
+  if (pct == null) return 'var(--text-muted)'
+  if (pct > 0) return 'var(--stock-up)'
+  if (pct < 0) return 'var(--stock-down)'
+  return 'var(--text-muted)'
 }
 
 async function select(row) {

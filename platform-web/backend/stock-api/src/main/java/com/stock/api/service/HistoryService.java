@@ -86,9 +86,15 @@ public class HistoryService {
                         "SELECT d.code, s.name, d.close AS price, d.change_pct AS anomaly_val, " +
                         "d.volume, d.amount " +
                         "FROM dws_stock_day d LEFT JOIN dim_stock s ON d.code = s.code " +
-                        "WHERE d.trade_date = ? AND ( " +
-                        "  (d.code LIKE 'sh688%' AND (d.change_pct >= 19.9 OR d.change_pct <= -19.9)) OR " +
-                        "  (d.code NOT LIKE 'sh688%' AND (d.change_pct >= 9.9 OR d.change_pct <= -9.9)) " +
+                        "WHERE d.trade_date = ? " +
+                        // 排除新股（C/N 前缀无涨跌停限制）
+                        "AND s.name NOT LIKE 'C%' AND s.name NOT LIKE 'N%' AND ( " +
+                        // 科创板+创业板: ±20%
+                        "  ((d.code LIKE 'sh688%' OR d.code LIKE 'sz300%' OR d.code LIKE 'sz301%') " +
+                        "   AND (d.change_pct >= 19.9 OR d.change_pct <= -19.9)) OR " +
+                        // 主板: ±10%
+                        "  (d.code NOT LIKE 'sh688%' AND d.code NOT LIKE 'sz300%' AND d.code NOT LIKE 'sz301%' " +
+                        "   AND (d.change_pct >= 9.9 OR d.change_pct <= -9.9)) " +
                         ") ORDER BY ABS(d.change_pct) DESC LIMIT ?",
                         latestDate, limit);
                 default:

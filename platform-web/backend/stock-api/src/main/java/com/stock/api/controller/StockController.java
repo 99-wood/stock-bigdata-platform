@@ -79,7 +79,7 @@ public class StockController {
     }
 
     @PostMapping("/spark-batch")
-    public ApiResponse<Map<String, List<Double>>> sparkBatch(
+    public ApiResponse<Map<String, Object>> sparkBatch(
             @RequestBody List<String> codes) {
         return ApiResponse.success(redisService.getSparkBatch(codes));
     }
