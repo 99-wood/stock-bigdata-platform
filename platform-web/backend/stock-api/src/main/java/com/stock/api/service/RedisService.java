@@ -30,6 +30,7 @@ public class RedisService {
         this.objectMapper = objectMapper;
     }
 
+    private static final String KEY_SYSTEM_STATUS = "stock:system:status";
     private static final String KEY_MARKET_SUMMARY = "stock:market:summary";
     private static final String KEY_RANK_UP = "stock:rank:up";
     private static final String KEY_RANK_DOWN = "stock:rank:down";
@@ -687,5 +688,74 @@ public class RedisService {
         Object value = entries.get(key);
         if (value == null) return null;
         return value.toString();
+    }
+
+    /**
+     * Get system runtime status from stock:system:status Hash.
+     * Returns null if the key doesn't exist (consumer not running).
+     */
+    public SystemStatusDTO getSystemStatus() {
+        try {
+            Map<Object, Object> entries = stringRedisTemplate.opsForHash().entries(KEY_SYSTEM_STATUS);
+            if (entries == null || entries.isEmpty()) return null;
+
+            return SystemStatusDTO.builder()
+                .status(getStringValue(entries, "status"))
+                .mode(getStringValue(entries, "mode"))
+                .targetDate(getStringValue(entries, "target_date"))
+                .startedAt(getStringValue(entries, "started_at"))
+                .uptimeSeconds(entries.get("uptime_seconds") != null
+                    ? Integer.parseInt(entries.get("uptime_seconds").toString()) : null)
+                .heartbeatAt(getStringValue(entries, "heartbeat_at"))
+
+                .featureOds(getStringValue(entries, "feature_ods"))
+                .featureDwd(getStringValue(entries, "feature_dwd"))
+                .featureRank(getStringValue(entries, "feature_rank"))
+                .featureMarket(getStringValue(entries, "feature_market"))
+                .featureMinute(getStringValue(entries, "feature_minute"))
+                .featureFlushMinute(getStringValue(entries, "feature_flush_minute"))
+                .featureFlushDaily(getStringValue(entries, "feature_flush_daily"))
+                .featureFlushdb(getStringValue(entries, "feature_flushdb"))
+
+                .currentDate(getStringValue(entries, "current_date"))
+                .redisKeys(entries.get("redis_keys") != null
+                    ? Integer.parseInt(entries.get("redis_keys").toString()) : null)
+                .minuteWindows(entries.get("minute_windows") != null
+                    ? Integer.parseInt(entries.get("minute_windows").toString()) : null)
+                .ohlcvCodes(entries.get("ohlcv_codes") != null
+                    ? Integer.parseInt(entries.get("ohlcv_codes").toString()) : null)
+                .rankUpCount(entries.get("rank_up_count") != null
+                    ? Integer.parseInt(entries.get("rank_up_count").toString()) : null)
+                .rankAmountCount(entries.get("rank_amount_count") != null
+                    ? Integer.parseInt(entries.get("rank_amount_count").toString()) : null)
+                .batchCount(entries.get("batch_count") != null
+                    ? Long.parseLong(entries.get("batch_count").toString()) : null)
+                .batchMs(entries.get("batch_ms") != null
+                    ? Integer.parseInt(entries.get("batch_ms").toString()) : null)
+
+                .consumerLag(entries.get("consumer_lag") != null
+                    ? Long.parseLong(entries.get("consumer_lag").toString()) : null)
+                .consumerPct(entries.get("consumer_pct") != null
+                    ? Integer.parseInt(entries.get("consumer_pct").toString()) : null)
+
+                .flushWindowsDone(entries.get("flush_windows_done") != null
+                    ? Integer.parseInt(entries.get("flush_windows_done").toString()) : null)
+                .flushWindowsTotal(entries.get("flush_windows_total") != null
+                    ? Integer.parseInt(entries.get("flush_windows_total").toString()) : null)
+                .flushRows(entries.get("flush_rows") != null
+                    ? Integer.parseInt(entries.get("flush_rows").toString()) : null)
+                .flushElapsedSec(entries.get("flush_elapsed_sec") != null
+                    ? Integer.parseInt(entries.get("flush_elapsed_sec").toString()) : null)
+                .lastFlushAt(getStringValue(entries, "last_flush_at"))
+                .lastFlushType(getStringValue(entries, "last_flush_type"))
+
+                .lastError(getStringValue(entries, "last_error"))
+                .lastErrorAt(getStringValue(entries, "last_error_at"))
+                .updatedAt(getStringValue(entries, "updated_at"))
+                .build();
+        } catch (Exception e) {
+            log.warn("Failed to get system status: {}", e.getMessage());
+            return null;
+        }
     }
 }

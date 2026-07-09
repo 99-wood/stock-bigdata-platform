@@ -4,7 +4,7 @@
     <aside class="side-list">
       <div class="sl-top">
         <div class="sl-top-row">
-          <router-link to="/" class="sl-back"><el-icon><ArrowLeft /></el-icon></router-link>
+          <router-link to="/admin" class="sl-back"><el-icon><ArrowLeft /></el-icon></router-link>
           <h2 class="sl-title">STOCK SCANNER</h2>
           <span class="sl-chip">{{ filtered.length }} / {{ all.length }}</span>
         </div>

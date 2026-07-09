@@ -2,6 +2,7 @@ package com.stock.api.controller;
 
 import com.stock.api.common.ApiResponse;
 import com.stock.api.model.dto.MarketSummaryDTO;
+import com.stock.api.model.dto.SystemStatusDTO;
 import com.stock.api.service.HistoryService;
 import com.stock.api.service.RedisService;
 import lombok.RequiredArgsConstructor;
@@ -39,5 +40,14 @@ public class DashboardController {
     @GetMapping("/treemap")
     public ApiResponse<Map<String, List<Map<String, Object>>>> treemap() {
         return ApiResponse.success(redisService.getTreemap());
+    }
+
+    @GetMapping("/system-status")
+    public ApiResponse<SystemStatusDTO> systemStatus() {
+        SystemStatusDTO data = redisService.getSystemStatus();
+        if (data == null) {
+            return ApiResponse.error(503, "System status not available (consumer may be offline)");
+        }
+        return ApiResponse.success(data);
     }
 }
