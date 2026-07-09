@@ -82,7 +82,7 @@
     </div>
 
     <!-- Update time -->
-    <div class="sp-foot" v-if="status.updatedAt">
+    <div class="sp-foot" v-if="status.updatedAt && status.updatedAt.length >= 19">
       {{ status.updatedAt.substring(11, 19) }}
     </div>
   </div>
@@ -93,7 +93,6 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { dashboardApi } from '@/api/request'
 
 const raw = ref(null)
-let timer = null
 
 // Normalize snake_case → camelCase for template use
 const status = computed(() => {
@@ -173,9 +172,11 @@ function fmtKeys(v) {
   return String(v)
 }
 
+let timer = null
+
 onMounted(() => {
   fetchStatus()
-  timer = setInterval(fetchStatus, 30000) // 30s refresh
+  timer = setInterval(fetchStatus, 30000)
 })
 
 onUnmounted(() => clearInterval(timer))

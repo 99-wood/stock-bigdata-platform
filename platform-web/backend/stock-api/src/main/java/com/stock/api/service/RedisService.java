@@ -690,6 +690,18 @@ public class RedisService {
         return value.toString();
     }
 
+    private Integer getIntValue(Map<Object, Object> entries, String key) {
+        Object value = entries.get(key);
+        if (value == null) return null;
+        try { return Integer.parseInt(value.toString()); } catch (NumberFormatException e) { return null; }
+    }
+
+    private Long getLongValue(Map<Object, Object> entries, String key) {
+        Object value = entries.get(key);
+        if (value == null) return null;
+        try { return Long.parseLong(value.toString()); } catch (NumberFormatException e) { return null; }
+    }
+
     /**
      * Get system runtime status from stock:system:status Hash.
      * Returns null if the key doesn't exist (consumer not running).
@@ -704,8 +716,7 @@ public class RedisService {
                 .mode(getStringValue(entries, "mode"))
                 .targetDate(getStringValue(entries, "target_date"))
                 .startedAt(getStringValue(entries, "started_at"))
-                .uptimeSeconds(entries.get("uptime_seconds") != null
-                    ? Integer.parseInt(entries.get("uptime_seconds").toString()) : null)
+                .uptimeSeconds(getIntValue(entries, "uptime_seconds"))
                 .heartbeatAt(getStringValue(entries, "heartbeat_at"))
 
                 .featureOds(getStringValue(entries, "feature_ods"))
@@ -718,34 +729,21 @@ public class RedisService {
                 .featureFlushdb(getStringValue(entries, "feature_flushdb"))
 
                 .currentDate(getStringValue(entries, "current_date"))
-                .redisKeys(entries.get("redis_keys") != null
-                    ? Integer.parseInt(entries.get("redis_keys").toString()) : null)
-                .minuteWindows(entries.get("minute_windows") != null
-                    ? Integer.parseInt(entries.get("minute_windows").toString()) : null)
-                .ohlcvCodes(entries.get("ohlcv_codes") != null
-                    ? Integer.parseInt(entries.get("ohlcv_codes").toString()) : null)
-                .rankUpCount(entries.get("rank_up_count") != null
-                    ? Integer.parseInt(entries.get("rank_up_count").toString()) : null)
-                .rankAmountCount(entries.get("rank_amount_count") != null
-                    ? Integer.parseInt(entries.get("rank_amount_count").toString()) : null)
-                .batchCount(entries.get("batch_count") != null
-                    ? Long.parseLong(entries.get("batch_count").toString()) : null)
-                .batchMs(entries.get("batch_ms") != null
-                    ? Integer.parseInt(entries.get("batch_ms").toString()) : null)
+                .redisKeys(getIntValue(entries, "redis_keys"))
+                .minuteWindows(getIntValue(entries, "minute_windows"))
+                .ohlcvCodes(getIntValue(entries, "ohlcv_codes"))
+                .rankUpCount(getIntValue(entries, "rank_up_count"))
+                .rankAmountCount(getIntValue(entries, "rank_amount_count"))
+                .batchCount(getLongValue(entries, "batch_count"))
+                .batchMs(getIntValue(entries, "batch_ms"))
 
-                .consumerLag(entries.get("consumer_lag") != null
-                    ? Long.parseLong(entries.get("consumer_lag").toString()) : null)
-                .consumerPct(entries.get("consumer_pct") != null
-                    ? Integer.parseInt(entries.get("consumer_pct").toString()) : null)
+                .consumerLag(getLongValue(entries, "consumer_lag"))
+                .consumerPct(getIntValue(entries, "consumer_pct"))
 
-                .flushWindowsDone(entries.get("flush_windows_done") != null
-                    ? Integer.parseInt(entries.get("flush_windows_done").toString()) : null)
-                .flushWindowsTotal(entries.get("flush_windows_total") != null
-                    ? Integer.parseInt(entries.get("flush_windows_total").toString()) : null)
-                .flushRows(entries.get("flush_rows") != null
-                    ? Integer.parseInt(entries.get("flush_rows").toString()) : null)
-                .flushElapsedSec(entries.get("flush_elapsed_sec") != null
-                    ? Integer.parseInt(entries.get("flush_elapsed_sec").toString()) : null)
+                .flushWindowsDone(getIntValue(entries, "flush_windows_done"))
+                .flushWindowsTotal(getIntValue(entries, "flush_windows_total"))
+                .flushRows(getIntValue(entries, "flush_rows"))
+                .flushElapsedSec(getIntValue(entries, "flush_elapsed_sec"))
                 .lastFlushAt(getStringValue(entries, "last_flush_at"))
                 .lastFlushType(getStringValue(entries, "last_flush_type"))
 
