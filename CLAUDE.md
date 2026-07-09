@@ -120,7 +120,7 @@ Trend chart in Dashboard uses MySQL `ads_market_summary` history for initial lin
 ### Router
 
 - `/` → redirects to `/dashboard`
-- `/dashboard` → 3-column layout: 大盘+涨幅榜+跌幅榜 | 异动速览(振幅/放量/涨跌停) | MarketTreemap. No click interaction on rank items (read-only display). Trend chart shows up/down ratio + avg change_pct.
+- `/dashboard` → 2-row layout: top=大盘+Treemap(绿跌\|红涨横排), bottom=涨跌双列+异动(振幅\|放量\|涨跌停横排). Left column 45%, right column flex. Read-only. Trend chart with up/down area + avg line.
 - `/stocks` → split-panel stock list with inline detail (click to view Level-2 depth)
 - `/stock/:code` → standalone stock detail page
 - `/admin` → copy of dashboard, reserved for future customization
@@ -129,12 +129,12 @@ Trend chart in Dashboard uses MySQL `ads_market_summary` history for initial lin
 
 | Component | Role |
 |-----------|------|
-| `Dashboard.vue` | 3-column: 大盘+涨跌双列(50%) | 异动(20%) | Treemap(30%). Trend chart (MySQL history + WebSocket push) with stacked area (up/down ratio) + line (avg change_pct). Dual yAxis. Static display. |
-| `RankPanel.vue` | Ranked stock list with two-column layout (1-10 left, 11-20 right). Sparkline mini SVG charts (2px fixed step, left-to-right growth), FLIP/TransitionGroup animation. Compact row padding, rank badge 16px no-radius. bid/ask shows `--` when Level-2 data missing. |
+| `Dashboard.vue` | 2-row: top=大盘(左)+Treemap绿\|红横排(右), bottom=涨跌双列(左)+异动振幅\|放量\|涨跌停横排(右). col-left 45%, col-right flex. Trend chart dual yAxis (up/down area + avg line). Static display. |
+| `RankPanel.vue` | Ranked stock list: two-column (1-10 left, 11-20 right). Row=[badge\|name(natural width)\|sparkline(flex:1)\|bid/ask(right)]. Sparkline: `preserveAspectRatio="xMinYMid meet"`, pad=0, xStep=2. FLIP/TransitionGroup animation. bid/ask → `--` if Level-2 missing. |
 | `StockDetailPanel.vue` | Stock detail: hero section (name/code/price/bid-ask + 8-field OHLCV inline grid) + `KLineChart` + depth ladder (25% right). Fetches Redis OHLCV + Level-2 merge. Name color follows change_pct. Time uses accent color (11px). |
 | `KLineChart.vue` | ECharts candlestick + volume bar. `boundaryGap: false` + `barMaxWidth: 8` prevents single-candle stretch. Grid: K-line 70% height, volume 26%. Minute K-line from Redis. |
-| `MarketTreemap.vue` | Dual ECharts treemap: Top 20 gainers (red) + Top 20 losers (green) by amount. Slice layout (`squareRatio: 1.5`). Color: `rgba(255,73,91,opacity)` / `rgba(63,185,80,opacity)`, opacity 0.5→1.0 linear by |change_pct| capped at ±10%. Font size 11-24px √amount. |
-| `AnomalyPanel.vue` | Three-section anomaly monitor: 振幅榜 (amplitude), 放量异动 (volume spike), 涨跌停 (limit up/down). 60s auto-refresh. Color-coded values. No scrolling (static display). |
+| `MarketTreemap.vue` | Dual ECharts treemap: Top 20 gainers (red) + Top 20 losers (green) by amount, horizontal side-by-side (绿左红右). Slice layout (`squareRatio: 1.5`). Color: `rgba(255,73,91,opacity)` / `rgba(63,185,80,opacity)`, opacity 0.5→1.0 linear by |change_pct| capped at ±10%. |
+| `AnomalyPanel.vue` | Three-column horizontal anomaly monitor: 振幅(amplitude) \| 放量异动(volume spike) \| 涨跌停(limit up/down). 60s auto-refresh. Color-coded values (hot/warn). Static display (overflow: hidden). |
 | `AlertTicker.vue` | Scrolling alert bar at page bottom. |
 
 ### State management (Pinia)
