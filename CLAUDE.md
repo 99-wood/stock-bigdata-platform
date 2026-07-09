@@ -61,8 +61,8 @@ Key inventory (all under `stock:` namespace):
 
 | Controller | Endpoints |
 |-----------|----------|
-| `DashboardController` | `/api/dashboard/summary`, `/api/dashboard/treemap` |
-| `StockController` | `/api/stocks` (list + search), `/api/stocks/{code}`, `/api/stocks/{code}/minutes`, `/api/stocks/{code}/history`, `/api/stocks/top-*`, `/api/stocks/spark-batch` (POST) |
+| `DashboardController` | `/api/dashboard/summary`, `/api/dashboard/treemap`, `/api/dashboard/summary-history` |
+| `StockController` | `/api/stocks` (list + search), `/api/stocks/{code}`, `/api/stocks/{code}/minutes`, `/api/stocks/{code}/history`, `/api/stocks/top-*`, `/api/stocks/spark-batch` (POST), `/api/stocks/anomaly` |
 | `AlertController` | `/api/alerts/latest` |
 | `DebugController` | `/api/debug/redis-keys` (Redis diagnostic) |
 
@@ -107,12 +107,20 @@ When Redis is flushed/archived, `RedisService.getStockLatest()` falls back to `H
 
 `GET /api/dashboard/treemap` returns `{up: [...], down: [...]}` — top 20 gainers and losers by amount, separately. Uses SMEMBERS + MGET across all OHLCV codes.
 
+### Pattern: Anomaly detection (MySQL)
+
+`GET /api/stocks/anomaly?type=amplitude|volume_spike|limit_up_down&limit=N` queries `dws_stock_day` with `dim_stock` join. Amplitude = `(high-low)/open`, volume spike = `today_vol / yesterday_vol`, limit up/down = `change_pct >= ±9.9` (主板) or `>= ±19.9` (科创板 688xxx). Only active with `@Profile("mysql")`.
+
+### Pattern: Trend chart (MySQL + WebSocket hybrid)
+
+Trend chart in Dashboard uses MySQL `ads_market_summary` history for initial line, then WebSocket `onMarket` pushes new points only when `avg_change_pct` value changes (de-duped). Dual yAxis: left for up/down ratio stacked area, right for avg change_pct line. Max 120 points sliding window.
+
 ## Frontend architecture
 
 ### Router
 
 - `/` → redirects to `/dashboard`
-- `/dashboard` → 3-column dashboard: 涨幅榜 (left) + 跌幅榜 (mid) + MarketTreemap (right). No click interaction on rank items (read-only display).
+- `/dashboard` → 3-column layout: 大盘+涨幅榜+跌幅榜 | 异动速览(振幅/放量/涨跌停) | MarketTreemap. No click interaction on rank items (read-only display). Trend chart shows up/down ratio + avg change_pct.
 - `/stocks` → split-panel stock list with inline detail (click to view Level-2 depth)
 - `/stock/:code` → standalone stock detail page
 - `/admin` → copy of dashboard, reserved for future customization
@@ -121,11 +129,12 @@ When Redis is flushed/archived, `RedisService.getStockLatest()` falls back to `H
 
 | Component | Role |
 |-----------|------|
-| `Dashboard.vue` | 3-column layout: market breadth + 涨幅榜 (left 26%) | 跌幅榜 (mid 26%) | `MarketTreemap` (right, flex:1). Rank items are display-only (no click). |
-| `RankPanel.vue` | Ranked stock list with two-column layout (1-10 left, 11-20 right). Sparkline mini SVG charts (2px fixed step, left-to-right growth), FLIP/TransitionGroup animation. Compact row padding, rank badge 16px no-radius. |
+| `Dashboard.vue` | 3-column: 大盘+涨跌双列(50%) | 异动(20%) | Treemap(30%). Trend chart (MySQL history + WebSocket push) with stacked area (up/down ratio) + line (avg change_pct). Dual yAxis. Static display. |
+| `RankPanel.vue` | Ranked stock list with two-column layout (1-10 left, 11-20 right). Sparkline mini SVG charts (2px fixed step, left-to-right growth), FLIP/TransitionGroup animation. Compact row padding, rank badge 16px no-radius. bid/ask shows `--` when Level-2 data missing. |
 | `StockDetailPanel.vue` | Stock detail: hero section (name/code/price/bid-ask + 8-field OHLCV inline grid) + `KLineChart` + depth ladder (25% right). Fetches Redis OHLCV + Level-2 merge. Name color follows change_pct. Time uses accent color (11px). |
 | `KLineChart.vue` | ECharts candlestick + volume bar. `boundaryGap: false` + `barMaxWidth: 8` prevents single-candle stretch. Grid: K-line 70% height, volume 26%. Minute K-line from Redis. |
 | `MarketTreemap.vue` | Dual ECharts treemap: Top 20 gainers (red) + Top 20 losers (green) by amount. Slice layout (`squareRatio: 1.5`). Color: `rgba(255,73,91,opacity)` / `rgba(63,185,80,opacity)`, opacity 0.5→1.0 linear by |change_pct| capped at ±10%. Font size 11-24px √amount. |
+| `AnomalyPanel.vue` | Three-section anomaly monitor: 振幅榜 (amplitude), 放量异动 (volume spike), 涨跌停 (limit up/down). 60s auto-refresh. Color-coded values. No scrolling (static display). |
 | `AlertTicker.vue` | Scrolling alert bar at page bottom. |
 
 ### State management (Pinia)
@@ -153,6 +162,10 @@ When Redis is flushed/archived, `RedisService.getStockLatest()` falls back to `H
 - **Dashboard is read-only** — rank items have no `@select` handler. Search still navigates to `/stock/:code`.
 - **Treemap color must match CSS variables**: `#FF495B` (up) and `#3FB950` (down). Hardcoded values break visual consistency.
 - **Sparkline uses fixed 2px x-step** — data grows rightward, not proportionally scaled. SVG viewBox 90×20.
+- **Level-2 data (`stock:quote:{code}`) may be nil** — bid/ask will show `--`. DTO uses `@JsonInclude(NON_NULL)`, frontend must check `== null` not just falsy.
+- **Anomaly panel is static** — `overflow: hidden`, no scrolling. Items that don't fit are hidden.
+- **Trend chart dedupes WebSocket points** — only pushes when `avg_change_pct` actually changes, preventing flat lines.
+- **A股涨跌停阈值** — 主板 ±9.9%, 科创板(688xxx) ±19.9%. Query uses `code LIKE 'sh688%'` to differentiate.
 
 ## Branch
 
