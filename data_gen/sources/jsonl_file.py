@@ -6,6 +6,7 @@ import logging
 import os
 
 from sources.base import BaseSource
+import config
 
 log = logging.getLogger("jsonl")
 
@@ -45,6 +46,10 @@ class JsonlFileSource(BaseSource):
             log.warning(f"No .jsonl files in {JSONL_DIR}")
             return
 
+        filter_date = config.JSONL_FILTER_DATE
+        total_lines = 0
+        skipped_lines = 0
+
         for fname in files:
             path = os.path.join(JSONL_DIR, fname)
             with open(path, "r", encoding="utf-8") as f:
@@ -52,20 +57,39 @@ class JsonlFileSource(BaseSource):
                     line = line.strip()
                     if not line:
                         continue
+                    total_lines += 1
+
+                    # 方案B：日期过滤时先做字符串预扫，跳过不匹配的行
+                    if filter_date and filter_date not in line:
+                        skipped_lines += 1
+                        continue
+
                     try:
                         obj = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    # 提取每轮数据
                     rows = self._extract_rows(obj)
                     if rows:
-                        self._rounds.append(rows)
+                        if filter_date:
+                            rows = [r for r in rows if r.get("trade_date", "") == filter_date]
+                        if rows:
+                            self._rounds.append(rows)
 
-        log.info(
-            f"JSONL loaded: {len(files)} file(s), "
-            f"{len(self._rounds)} rounds, "
-            f"{sum(len(r) for r in self._rounds):,} total records"
-        )
+        if filter_date:
+            log.info(
+                f"JSONL loaded: {len(files)} file(s), "
+                f"pre-scanned {total_lines} lines, "
+                f"skipped {skipped_lines} (no '{filter_date}'), "
+                f"parsed {total_lines - skipped_lines}, "
+                f"{len(self._rounds)} rounds, "
+                f"{sum(len(r) for r in self._rounds):,} total records"
+            )
+        else:
+            log.info(
+                f"JSONL loaded: {len(files)} file(s), "
+                f"{len(self._rounds)} rounds, "
+                f"{sum(len(r) for r in self._rounds):,} total records"
+            )
 
     @staticmethod
     def _extract_rows(obj):
