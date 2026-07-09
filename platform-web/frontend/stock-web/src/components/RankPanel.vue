@@ -17,7 +17,7 @@
               <span class="spark-wrap">
                 <svg v-if="sparkData[item.code]" class="spark-svg" :viewBox="sparkViewBox()" preserveAspectRatio="none">
                   <path :d="sparkArea(sparkData[item.code])" :fill="sparkColor(item)" opacity="0.12" />
-                  <path :d="sparkPath(sparkData[item.code])" fill="none" :stroke="sparkColor(item)" stroke-width="1.2" />
+                  <path :d="sparkPath(sparkData[item.code])" fill="none" :stroke="sparkColor(item)" stroke-width="1.5" />
                 </svg>
               </span>
               <div class="stock-sides">
@@ -37,7 +37,7 @@
               <span class="spark-wrap">
                 <svg v-if="sparkData[item.code]" class="spark-svg" :viewBox="sparkViewBox()" preserveAspectRatio="none">
                   <path :d="sparkArea(sparkData[item.code])" :fill="sparkColor(item)" opacity="0.12" />
-                  <path :d="sparkPath(sparkData[item.code])" fill="none" :stroke="sparkColor(item)" stroke-width="1.2" />
+                  <path :d="sparkPath(sparkData[item.code])" fill="none" :stroke="sparkColor(item)" stroke-width="1.5" />
                 </svg>
               </span>
               <div class="stock-sides">
@@ -109,26 +109,26 @@ watch(() => props.data, (list) => {
 }, { immediate: true, deep: false })
 
 function sparkViewBox() {
-  return `0 0 ${MAX_MIN} 20`
+  return `0 0 ${MAX_MIN + 4} 20`
 }
 
 function sparkArea(closes) {
   if (!closes || closes.length < 2) return ''
-  const h = 20, padY = 1.5, times = sparkTimes.value
+  const h = 20, padY = 2, padX = 2, times = sparkTimes.value
   const min = Math.min(...closes), max = Math.max(...closes), range = max - min
   const midY = h / 2
-  // 按连续时间段分组，每段独立闭合填充
+  const xScale = (MAX_MIN - padX * 2) / MAX_MIN
   const segments = []
   let seg = []
   for (let i = 0; i < closes.length; i++) {
     const gap = i > 0 && (times[i] - times[i - 1] >= 10)
     if (gap && seg.length) { segments.push(seg); seg = [] }
-    const x = times[i] != null ? times[i] : (i / (closes.length - 1)) * MAX_MIN
+    const rawX = times[i] != null ? times[i] : (i / (closes.length - 1)) * MAX_MIN
+    const x = padX + rawX * xScale
     const y = range === 0 ? midY : padY + (1 - (closes[i] - min) / range) * (h - padY * 2)
     seg.push({ x, y })
   }
   if (seg.length) segments.push(seg)
-  // 每段：线→右下角→左下角→闭合
   return segments.map(s => {
     const top = s.map((p, j) => `${j === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
     const lastX = s[s.length - 1].x, firstX = s[0].x
@@ -138,11 +138,13 @@ function sparkArea(closes) {
 
 function sparkPath(closes) {
   if (!closes || closes.length < 2) return ''
-  const h = 20, padY = 1.5, times = sparkTimes.value
+  const h = 20, padY = 2, padX = 2, times = sparkTimes.value
   const min = Math.min(...closes), max = Math.max(...closes), range = max - min
   const midY = h / 2
+  const xScale = (MAX_MIN - padX * 2) / MAX_MIN
   return closes.map((v, i) => {
-    const x = times[i] != null ? times[i] : (i / (closes.length - 1)) * MAX_MIN
+    const rawX = times[i] != null ? times[i] : (i / (closes.length - 1)) * MAX_MIN
+    const x = padX + rawX * xScale
     const y = range === 0 ? midY : padY + (1 - (v - min) / range) * (h - padY * 2)
     // 时间跳跃 > 10 分钟（如午休）断开路径，不连斜线
     const gap = i > 0 && (times[i] - times[i - 1] >= 10)

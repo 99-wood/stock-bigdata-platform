@@ -36,7 +36,11 @@
     <!-- ═══ K-line + Depth ═══ -->
     <div class="main-split">
       <div class="kline-area">
-        <KLineChart :data="minuteData" />
+        <div class="kl-tabs">
+          <button class="kl-tab" :class="{ on: klineType === 'minute' }" @click="switchKline('minute')">分时</button>
+          <button class="kl-tab" :class="{ on: klineType === 'daily' }" @click="switchKline('daily')">日K</button>
+        </div>
+        <KLineChart :data="klineData" />
       </div>
       <div class="depth-area">
         <section class="depth">
@@ -162,11 +166,43 @@ const isAllBuyZero = computed(() => buys.value.length > 0 && buys.value.every(l 
 function sellBar(vol) { const m = Math.max(...sells.value.map(l => l.vol), 1); return Math.round(vol / m * 100) }
 function buyBar(vol) { const m = Math.max(...buys.value.map(l => l.vol), 1); return Math.round(vol / m * 100) }
 
-// K-line minute data
+// K-line: 分时 / 日K 切换
+const klineType = ref('minute')
 const minuteData = ref([])
+const dailyData = ref([])
+
+const klineData = computed(() => klineType.value === 'minute' ? minuteData.value : dailyData.value)
+
+async function loadMinute(code) {
+  try { minuteData.value = await stockApi.getStockMinutes(code, '') || [] } catch { minuteData.value = [] }
+}
+async function loadDaily(code) {
+  try {
+    const rows = await stockApi.getStockHistory(code, 120) || []
+    // 转换日K格式: trade_date→time, 保持open/high/low/close, volume→vol
+    dailyData.value = rows.map(r => ({
+      time: (r.trade_date || '').substring(5), // "MM-DD"
+      open: r.open, high: r.high, low: r.low, close: r.close,
+      vol: r.volume || 0
+    }))
+  } catch { dailyData.value = [] }
+}
+
+async function switchKline(type) {
+  klineType.value = type
+  const code = p.stock?.code
+  if (!code) return
+  if (type === 'daily' && !dailyData.value.length) await loadDaily(code)
+}
+
 watch(() => p.stock?.code, async (code) => {
   if (!code) return
-  try { minuteData.value = await stockApi.getStockMinutes(code, '') || [] } catch { minuteData.value = [] }
+  dailyData.value = []
+  if (klineType.value === 'daily') {
+    await loadDaily(code)
+  } else {
+    await loadMinute(code)
+  }
 }, { immediate: true })
 </script>
 
@@ -222,7 +258,22 @@ watch(() => p.stock?.code, async (code) => {
 
 /* ── K-line + Depth Split ── */
 .main-split { flex: 1; display: grid; grid-template-columns: 1fr 260px; gap: 0; min-height: 0 }
-.kline-area { min-height: 0; overflow: hidden }
+.kline-area { min-height: 0; overflow: hidden; display: flex; flex-direction: column }
+
+.kl-tabs {
+  display: flex; gap: 0; flex-shrink: 0;
+  margin-bottom: 4px;
+}
+.kl-tab {
+  padding: 3px 14px; font-size: 11px; font-weight: 600;
+  background: transparent; border: 1px solid var(--border-subtle);
+  color: var(--text-muted); cursor: pointer;
+  font-family: var(--font-mono); transition: all .15s;
+}
+.kl-tab:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm) }
+.kl-tab:last-child  { border-radius: 0 var(--radius-sm) var(--radius-sm) 0 }
+.kl-tab.on { background: var(--accent-bg); color: var(--accent); border-color: var(--accent) }
+.kl-tab:hover:not(.on) { color: var(--text-primary) }
 
 /* ── Depth ── */
 .depth-area { min-width: 0 }

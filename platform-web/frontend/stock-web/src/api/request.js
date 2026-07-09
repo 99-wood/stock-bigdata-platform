@@ -40,6 +40,7 @@ export const stockApi = {
   getTopQuant: (count = 20) => request.get('/stocks/top-quant', { params: { count } }),
   getStockDetail: (code) => request.get(`/stocks/${code}`),
   getStockMinutes: (code, date) => request.get(`/stocks/${code}/minutes`, { params: { date } }),
+  getStockHistory: (code, limit = 120) => request.get(`/stocks/${code}/history`, { params: { limit } }),
   getSparkBatch: (codes) => request.post('/stocks/spark-batch', codes),
   getAnomaly: (type = 'amplitude', limit = 10) => request.get('/stocks/anomaly', { params: { type, limit } })
 }
