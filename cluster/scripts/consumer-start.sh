@@ -56,7 +56,7 @@ nohup spark-submit \
     --deploy-mode client \
     --executor-memory 2G \
     --total-executor-cores 6 \
-    --driver-class-path "$MYSQL_JAR" \
+    --driver-class-path "$APP_DIR:$MYSQL_JAR" \
     --jars "$MYSQL_JAR" \
     --conf spark.streaming.kafka.maxRatePerPartition=2000 \
     "$JAR_FILE" \
