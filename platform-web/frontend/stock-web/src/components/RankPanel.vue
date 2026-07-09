@@ -200,7 +200,7 @@ function sparkColor(item) {
   display: flex; align-items: center; padding: 3px 4px; gap: 2px;
   cursor: pointer; transition: background .1s;
   border-bottom: 1px solid rgba(45,51,64,0.3);
-  height: 36px; flex-shrink: 0;
+  height: 44px; flex-shrink: 0;
 }
 .row:nth-child(odd)  { background: transparent }
 .row:nth-child(even) { background: rgba(255,255,255,0.06) }

@@ -31,12 +31,11 @@
             <span class="slr-name" :class="getStockColorClass(row)">{{ row.name || row.code }}</span>
             <span class="slr-code" v-if="row.name" :class="getStockColorClass(row)">{{ row.code }}</span>
           </span>
-          <svg v-if="sparkData[row.code]" class="slr-spark" viewBox="0 0 72 20" :stroke="sparkColor(row)">
+          <svg v-if="sparkData[row.code]" class="slr-spark" :viewBox="'0 0 '+(SPARK_MAX+4)+' 20'" preserveAspectRatio="none" :stroke="sparkColor(row)">
             <path :d="sparkPath(sparkData[row.code])" fill="none" stroke-width="1.2" />
           </svg>
-          <span class="slr-ask">{{ fmtBA(row,'ask') }}</span>
-          <span class="slr-bid">{{ fmtBA(row,'bid') }}</span>
-          <span class="slr-spr">{{ spread(row) }}</span>
+          <span class="slr-price" :class="codeColor(row)">{{ fmtPrice(row.price) }}</span>
+          <span class="slr-pct" :class="codeColor(row)">{{ fmtPct(row) }}</span>
         </div>
       </div>
 
@@ -97,33 +96,45 @@ const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / 
 const paged = computed(() => filtered.value.slice((page.value-1)*pageSize, page.value*pageSize))
 const offset = computed(() => (page.value-1)*pageSize+1)
 
-function fmtBA(r, side) {
-  const raw = side==='bid' ? r.bid : r.ask
-  if (raw == null || raw === '') return '--'
-  return Number(raw).toFixed(2)
+function codeColor(item) { return getStockColorClass(item) }
+
+function fmtPrice(v) {
+  if (v == null) return '--'
+  return Number(v).toFixed(2)
 }
-function spread(r) {
-  if (r.bid==null||r.ask==null) return'--'
-  const b=Number(r.bid),a=Number(r.ask)
-  if(b>0&&a===0)return'涨停'; if(a>0&&b===0)return'跌停'; if(b===0&&a===0)return'停牌'
-  return (a-b).toFixed(3)
+function fmtPct(item) {
+  const pct = item.change_pct ?? item.changePct
+  if (pct == null) return '--'
+  return (pct >= 0 ? '+' : '') + Number(pct).toFixed(2) + '%'
 }
 // ---- Sparkline ----
 const sparkData = ref({})
-watch(all, async (list) => {
+const sparkTimes = ref([])
+const SPARK_MAX = 255
+
+watch(paged, async (list) => {
   const codes = list.map(i => i.code).filter(Boolean)
   if (!codes.length) return
-  try { sparkData.value = await stockApi.getSparkBatch(codes) || {} } catch {}
+  try {
+    const res = await stockApi.getSparkBatch(codes)
+    sparkTimes.value = (res?.times || []).map(Number)
+    sparkData.value = res?.data || res || {}
+  } catch {}
 }, { immediate: true, deep: false })
 
 function sparkPath(closes) {
   if (!closes || closes.length < 2) return ''
-  const h = 20, pad = 2, xStep = 2 // 固定 2px 点距，从左向右生长
-  const min = Math.min(...closes), max = Math.max(...closes), range = max - min || 1
+  const h = 20, padY = 2, padX = 2, times = sparkTimes.value
+  const min = Math.min(...closes), max = Math.max(...closes), range = max - min
+  const midY = h / 2
+  const xScale = (SPARK_MAX - padX * 2) / SPARK_MAX
   return closes.map((v, i) => {
-    const x = pad + i * xStep
-    const y = pad + (1 - (v - min) / range) * (h - pad * 2)
-    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+    const rawX = times[i] != null ? times[i] : (i / (closes.length - 1)) * SPARK_MAX
+    const x = padX + rawX * xScale
+    const y = range === 0 ? midY : padY + (1 - (v - min) / range) * (h - padY * 2)
+    const gap = i > 0 && (times[i] - times[i - 1] >= 10)
+    const cmd = (i === 0 || gap) ? 'M' : 'L'
+    return `${cmd}${x.toFixed(1)},${y.toFixed(1)}`
   }).join(' ')
 }
 function sparkColor(item) {
@@ -197,11 +208,14 @@ onMounted(async () => {
   border-bottom: 1px solid rgba(255,255,255,.02); cursor: pointer;
   transition: background .08s; font-family: var(--font-mono); font-size: 12px;
 }
+.sl-row:nth-child(odd)  { background: transparent }
+.sl-row:nth-child(even) { background: rgba(255,255,255,0.06) }
 .sl-row:hover { background: var(--bg-hover) }
 .sl-row.sel { background: var(--accent-bg); border-left: 2px solid var(--accent); padding-left: 14px }
 
 .slr-idx { width: 24px; color: var(--text-muted); font-size: 10px; flex-shrink: 0; text-align: right }
-.slr-info { flex: 1; overflow: hidden; line-height: 1.3 }
+.slr-info { flex-shrink: 0; overflow: hidden; line-height: 1.3 }
+.slr-spark { flex: 1; width: auto; min-width: 30px; height: 20px; flex-shrink: 1; opacity: 0.8 }
 .slr-name {
   font-weight: 500; font-size: 12px; color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-sans);
@@ -210,11 +224,8 @@ onMounted(async () => {
   font-size: 10px; color: var(--text-muted); font-family: var(--font-mono);
   display: block;
 }
-.slr-bid, .slr-ask { width: 62px; text-align: right; font-weight: 500; font-size: 11px }
-.slr-bid { color: var(--stock-down) }
-.slr-ask { color: var(--stock-up) }
-.slr-spr { width: 48px; text-align: right; color: var(--text-muted); font-size: 10px }
-.slr-spark { width: 72px; height: 20px; flex-shrink: 0; opacity: 0.8; }
+.slr-price { width: 56px; text-align: right; font-size: 11px; font-family: var(--font-mono) }
+.slr-pct { width: 62px; text-align: right; font-weight: 600; font-size: 10px; font-family: var(--font-mono) }
 
 .sl-loading { padding: 24px 16px }
 .sl-empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:var(--text-muted); font-size:13px }

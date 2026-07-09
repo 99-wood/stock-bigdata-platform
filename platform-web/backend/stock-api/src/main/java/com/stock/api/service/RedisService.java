@@ -432,33 +432,91 @@ public class RedisService {
 
     /** Batch sparkline: returns { "times": [...], "data": { code: [...] } }. */
     public Map<String, Object> getSparkBatch(List<String> codes) {
-        // 1. 命中缓存：直接返回
+        // 1. 命中全量缓存：直接返回
         Map<String, List<Double>> cached = sparkCache;
         List<String> cachedTimes = sparkTimes;
         if (cached != null && cachedTimes != null
                 && System.currentTimeMillis() - sparkCacheTime < 30_000) {
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("times", cachedTimes);
-            Map<String, List<Double>> data = new LinkedHashMap<>();
-            for (String code : codes) {
-                List<Double> v = cached.get(code);
-                if (v != null) data.put(code, v);
-            }
-            result.put("data", data);
-            return result;
+            return buildSparkResult(codes, cached, cachedTimes);
         }
 
-        // 2. 缓存未命中：从 minute hashes 重建
-        computeSparkFromMinutes();
+        // 2. 缓存未命中：按需查询（只查请求的 codes，快）
+        return computeSparkForCodes(codes);
+    }
+
+    private Map<String, Object> buildSparkResult(List<String> codes,
+            Map<String, List<Double>> source, List<String> times) {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("times", sparkTimes);
+        result.put("times", times);
         Map<String, List<Double>> data = new LinkedHashMap<>();
         for (String code : codes) {
-            List<Double> v = sparkCache.get(code);
+            List<Double> v = source.get(code);
             if (v != null) data.put(code, v);
         }
         result.put("data", data);
         return result;
+    }
+
+    /** 按需查询：仅查请求的 codes，不扫全量 */
+    private Map<String, Object> computeSparkForCodes(List<String> codes) {
+        Map<String, List<Double>> data = new LinkedHashMap<>();
+        List<String> times = new ArrayList<>();
+        try {
+            Set<String> windows = stringRedisTemplate.opsForSet().members(KEY_MINUTE_WINDOWS);
+            if (windows == null || windows.isEmpty())
+                return buildSparkResult(codes, data, times);
+            String latestDate = windows.stream()
+                    .map(w -> w.substring(0, 10)).max(Comparator.naturalOrder()).orElse(null);
+            if (latestDate == null)
+                return buildSparkResult(codes, data, times);
+            List<String> sortedWindows = windows.stream()
+                    .filter(w -> w.startsWith(latestDate)).sorted().collect(Collectors.toList());
+            if (sortedWindows.isEmpty())
+                return buildSparkResult(codes, data, times);
+
+            // 时间轴
+            times = sortedWindows.stream().map(w -> {
+                String t = w.substring(11, 16);
+                int h = Integer.parseInt(t.substring(0, 2));
+                int m = Integer.parseInt(t.substring(3, 5));
+                int mins = (h - 9) * 60 + (m - 30);
+                if (mins < 0) mins = 0;
+                if (mins >= 210) mins -= 75;
+                return String.valueOf(mins);
+            }).collect(Collectors.toList());
+
+            // Pipeline: 只查请求的 codes × windows（例：20×32=640 次，非 5200×32）
+            List<String> codeOrder = new ArrayList<>();
+            List<Object> pipeResults = stringRedisTemplate.executePipelined(
+                new org.springframework.data.redis.core.SessionCallback<Object>() {
+                    public <K, V> Object execute(org.springframework.data.redis.core.RedisOperations<K, V> ops) {
+                        for (String code : codes) {
+                            for (String w : sortedWindows) {
+                                ops.opsForHash().get((K) (KEY_MINUTE_PREFIX + code + ":" + w), "close");
+                                codeOrder.add(code);
+                            }
+                        }
+                        return null;
+                    }
+                });
+
+            for (int i = 0; i < codeOrder.size() && i < pipeResults.size(); i++) {
+                Object v = pipeResults.get(i);
+                if (v != null) {
+                    data.computeIfAbsent(codeOrder.get(i), k -> new ArrayList<>())
+                        .add(Double.parseDouble(v.toString()));
+                }
+            }
+            // 截断对齐
+            final int wc = sortedWindows.size();
+            data.replaceAll((code, list) -> {
+                if (list.size() > wc) return new ArrayList<>(list.subList(0, wc));
+                return list;
+            });
+        } catch (Exception e) {
+            log.warn("Spark compute for codes failed: {}", e.getMessage());
+        }
+        return buildSparkResult(codes, data, times);
     }
 
     private void computeSparkFromMinutes() {
