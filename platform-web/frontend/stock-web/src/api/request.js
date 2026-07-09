@@ -26,7 +26,8 @@ export default request
 // Dashboard API
 export const dashboardApi = {
   getSummary: () => request.get('/dashboard/summary'),
-  getTreemap: () => request.get('/dashboard/treemap')
+  getTreemap: () => request.get('/dashboard/treemap'),
+  getSummaryHistory: (limit = 60) => request.get('/dashboard/summary-history', { params: { limit } })
 }
 
 // Stock API

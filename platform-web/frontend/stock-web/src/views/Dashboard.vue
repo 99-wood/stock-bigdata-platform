@@ -74,6 +74,9 @@
             <div class="bar-seg flat" :style="{ width: store.flatRatio + '%' }" v-if="store.flatRatio > 0"></div>
           </div>
 
+          <!-- trend sparkline -->
+          <div ref="trendRef" class="trend-chart"></div>
+
           <!-- four compact metric columns (icon+value inline) -->
           <div class="breadth-metrics">
             <div class="bmetric up">
@@ -138,10 +141,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import * as echarts from 'echarts'
 import { useStockStore } from '@/stores/stock'
 import { connectWebSocket, disconnectWebSocket } from '@/api/websocket'
 import { stockApi, dashboardApi } from '@/api/request'
@@ -149,6 +153,86 @@ import RankPanel from '@/components/RankPanel.vue'
 import AlertTicker from '@/components/AlertTicker.vue'
 import MarketTreemap from '@/components/MarketTreemap.vue'
 import AnomalyPanel from '@/components/AnomalyPanel.vue'
+
+// ---- 大盘趋势图（面积=涨跌比 + 线=平均涨跌幅） ----
+const trendRef = ref(null)
+const trendPoints = ref([])
+const MAX_TREND = 120
+const lastWsPct = ref(null)
+let trendChart = null
+
+async function loadTrendHistory() {
+  try {
+    const rows = await dashboardApi.getSummaryHistory(60) || []
+    if (!rows.length) return
+    trendPoints.value = rows.map(r => ({
+      time: (r.stat_time || '').substring(11, 16),
+      pct: r.avg_change_pct ?? r.avgChangePct ?? 0,
+      up: r.up_count ?? r.upCount ?? 0,
+      down: r.down_count ?? r.downCount ?? 0,
+      flat: r.flat_count ?? r.flatCount ?? 0,
+      total: r.total_stocks ?? r.totalStocks ?? 1
+    }))
+    redrawTrend()
+  } catch {}
+}
+
+function pushWsPoint(data) {
+  const pct = Math.round((data.avg_change_pct ?? data.avgChangePct ?? 0) * 100) / 100
+  if (pct === lastWsPct.value) return
+  lastWsPct.value = pct
+  const now = new Date()
+  trendPoints.value.push({
+    time: String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'),
+    pct,
+    up: data.up_count ?? data.upCount ?? 0,
+    down: data.down_count ?? data.downCount ?? 0,
+    flat: data.flat_count ?? data.flatCount ?? 0,
+    total: data.total_stocks ?? data.totalStocks ?? 1
+  })
+  if (trendPoints.value.length > MAX_TREND) trendPoints.value.shift()
+  redrawTrend()
+}
+
+function redrawTrend() {
+  if (!trendChart || !trendPoints.value.length) return
+  const times = trendPoints.value.map(p => p.time)
+  const pcts = trendPoints.value.map(p => p.pct)
+  const upRatio = trendPoints.value.map(p => p.total ? +(p.up / p.total * 100).toFixed(1) : 0)
+  const downRatio = trendPoints.value.map(p => p.total ? +(p.down / p.total * 100).toFixed(1) : 0)
+
+  const pts = trendPoints.value
+  trendChart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#13161D', borderColor: '#2D3340',
+      textStyle: { color: '#E3E7EC', fontSize: 11, fontFamily: "'Fira Code',monospace" },
+      formatter: (params) => {
+        const p = pts[params[0].dataIndex]
+        return `<span style="color:#8B949E">${p.time}</span><br/>
+          涨跌比 <span style="color:#FF495B">${p.up}</span>/<span style="color:#3FB950">${p.down}</span>/<span style="color:#636D7E">${p.flat}</span><br/>
+          均价涨幅 <b>${(p.pct >= 0 ? '+' : '') + p.pct.toFixed(2)}%</b>`
+      }
+    },
+    grid: { left: 0, right: 0, top: 4, bottom: 0 },
+    xAxis: { type: 'category', data: times, show: false, boundaryGap: false },
+    yAxis: [
+      { type: 'value', show: false },    // 左轴：涨跌比柱状
+      { type: 'value', show: false }     // 右轴：均价涨幅线
+    ],
+    series: [
+      // 涨跌比堆叠面积（左轴）：上绿(跌) + 下红(涨)
+      { type: 'line', data: upRatio, symbol: 'none', stack: 'breadth', yAxisIndex: 0,
+        lineStyle: { width: 0 }, areaStyle: { color: 'rgba(255,73,91,0.40)' } },
+      { type: 'line', data: downRatio, symbol: 'none', stack: 'breadth', yAxisIndex: 0,
+        lineStyle: { width: 0 }, areaStyle: { color: 'rgba(63,185,80,0.40)' } },
+      // 均价涨幅折线（右轴）
+      { type: 'line', data: pcts, symbol: 'none', yAxisIndex: 1,
+        lineStyle: { width: 1.5, color: '#58A6FF' } }
+    ]
+  })
+}
 
 const store = useStockStore()
 const router = useRouter()
@@ -221,9 +305,26 @@ async function refreshAll() {
 
 onMounted(() => {
   store.fetchAll()
+  nextTick(async () => {
+    if (trendRef.value) {
+      trendChart = echarts.init(trendRef.value, null, { renderer: 'canvas' })
+      trendChart.setOption({
+        backgroundColor: 'transparent',
+        grid: { left: 0, right: 4, top: 2, bottom: 0 },
+        xAxis: { type: 'category', data: [], show: false, boundaryGap: false },
+        yAxis: { type: 'value', show: false },
+        series: [{ type: 'line', data: [], symbol: 'none', lineStyle: { width: 1.5 } }]
+      })
+      await loadTrendHistory()
+    }
+  })
+  window.addEventListener('resize', () => trendChart?.resize())
   connectWebSocket({
     onConnected: () => { store.wsConnected = true },
-    onMarket: (d) => { store.updateMarketSummary(d) },
+    onMarket: (d) => {
+      store.updateMarketSummary(d)
+      if (d != null) pushWsPoint(d)
+    },
     onRankUp: (d) => { store.updateTopUp(d) },
     onRankDown: (d) => { store.updateTopDown(d) },
     onRankAmount: (d) => { store.updateTopAmount(d) },
@@ -231,7 +332,12 @@ onMounted(() => {
   })
 })
 
-onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
+onUnmounted(() => {
+  disconnectWebSocket()
+  store.wsConnected = false
+  trendChart?.dispose()
+  trendChart = null
+})
 </script>
 
 <style scoped>
@@ -444,6 +550,12 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
   color: var(--accent);
   font-family: var(--font-mono);
   flex-shrink: 0;
+}
+
+/* --- trend sparkline --- */
+.trend-chart {
+  height: 50px;
+  margin: 0;
 }
 
 /* --- stacked proportion bar --- */

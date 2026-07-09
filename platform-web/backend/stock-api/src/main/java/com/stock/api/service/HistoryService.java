@@ -100,6 +100,19 @@ public class HistoryService {
         }
     }
 
+    /** Get market summary history for trend chart. */
+    public List<Map<String, Object>> getSummaryHistory(int limit) {
+        try {
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+            return jdbc.queryForList(
+                "SELECT stat_time, avg_change_pct, up_count, down_count, flat_count, total_stocks " +
+                "FROM ads_market_summary ORDER BY stat_time ASC LIMIT ?", limit);
+        } catch (Exception e) {
+            log.warn("Failed summary history: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
     /** Get minute K-line for a specific date. */
     public List<Map<String, Object>> getMinuteHistory(String code, String date) {
         try {
