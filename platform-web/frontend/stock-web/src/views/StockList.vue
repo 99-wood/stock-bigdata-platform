@@ -83,6 +83,7 @@ import StockDetailPanel from '@/components/StockDetailPanel.vue'
 
 const all = ref([]); const loading = ref(true)
 const search = ref(''); const page = ref(1); const pageSize = 25
+watch(search, () => { page.value = 1 })
 const selected = ref(null)
 const selectedCode = computed(() => selected.value?.code ?? null)
 
