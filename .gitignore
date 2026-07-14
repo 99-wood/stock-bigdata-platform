@@ -76,6 +76,13 @@ dist/
 platform-web/**/run-dev.bat
 platform-web/**/clean.bat
 
+# Docker (local deployment, contains passwords)
+platform-web/Dockerfile
+platform-web/docker-compose.yml
+platform-web/**/Dockerfile
+platform-web/**/nginx.conf
+platform-web/**/application-docker.yml
+
 # Project-specific (not for commit)
 GIT_COLLABORATION_GUIDE.md
 README2.md

@@ -5,7 +5,7 @@
       <span class="panel-count">{{ data.length }}</span>
     </div>
     <div class="panel-body">
-      <div class="scroll-viewport" v-if="data.length">
+      <div class="scroll-viewport" v-if="data.length" @wheel.prevent>
         <div class="scroll-track" :style="{ animationDuration: scrollDuration + 's' }">
           <template v-for="(item, idx) in data" :key="item.code">
             <div class="row group" @click="$emit('select', item.code)">
@@ -186,7 +186,9 @@ function sparkColor(item) {
   flex: 1; overflow: hidden; min-height: 0;
   mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+  scrollbar-width: none;
 }
+.scroll-viewport::-webkit-scrollbar { display: none }
 .scroll-track { animation: rank-scroll linear infinite }
 .scroll-track:hover { animation-play-state: paused }
 

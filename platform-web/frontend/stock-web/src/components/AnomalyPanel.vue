@@ -226,7 +226,9 @@ onUnmounted(() => clearInterval(timer))
   overflow: hidden;
   mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+  scrollbar-width: none;
 }
+.ap-scroll-view::-webkit-scrollbar { display: none }
 .ap-scroll-track { animation: ap-scroll linear infinite }
 .ap-scroll-track:hover { animation-play-state: paused }
 
