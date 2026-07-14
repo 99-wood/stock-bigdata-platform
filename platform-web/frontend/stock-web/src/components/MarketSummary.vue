@@ -78,7 +78,7 @@ function formatAmount(v) {
 
 <style scoped>
 .market-summary {
-  padding: 16px;
+  /* no extra padding — aligns with rank-grid edges */
 }
 
 .summary-header {

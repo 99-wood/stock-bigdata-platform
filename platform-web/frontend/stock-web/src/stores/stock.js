@@ -31,6 +31,7 @@ export const useStockStore = defineStore('stock', {
     topUp: [],
     topDown: [],
     topAmount: [],
+    topQuant: [],
     alerts: [],
     tradeTime: '',
     loading: false,
@@ -45,6 +46,10 @@ export const useStockStore = defineStore('stock', {
     downRatio: (state) => {
       if (state.marketSummary.totalStocks === 0) return 0
       return (state.marketSummary.downCount / state.marketSummary.totalStocks * 100).toFixed(1)
+    },
+    flatRatio: (state) => {
+      if (state.marketSummary.totalStocks === 0) return 0
+      return (state.marketSummary.flatCount / state.marketSummary.totalStocks * 100).toFixed(1)
     }
   },
 
@@ -86,6 +91,15 @@ export const useStockStore = defineStore('stock', {
       }
     },
 
+    async fetchTopQuant() {
+      try {
+        const data = await stockApi.getTopQuant(20)
+        if (data) this.topQuant = data
+      } catch (e) {
+        console.error('Fetch top quant error:', e)
+      }
+    },
+
     async fetchAlerts() {
       try {
         const data = await alertApi.getLatest(20)
@@ -102,6 +116,7 @@ export const useStockStore = defineStore('stock', {
         this.fetchTopUp(),
         this.fetchTopDown(),
         this.fetchTopAmount(),
+        this.fetchTopQuant(),
         this.fetchAlerts()
       ])
       this.loading = false
