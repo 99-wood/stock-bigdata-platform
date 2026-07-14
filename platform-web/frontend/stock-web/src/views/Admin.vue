@@ -70,8 +70,8 @@
           <!-- stacked proportion bar -->
           <div class="breadth-bar">
             <div class="bar-seg up"   :style="{ width: store.upRatio + '%' }"   v-if="store.upRatio > 0"></div>
-            <div class="bar-seg down" :style="{ width: store.downRatio + '%' }" v-if="store.downRatio > 0"></div>
             <div class="bar-seg flat" :style="{ width: store.flatRatio + '%' }" v-if="store.flatRatio > 0"></div>
+            <div class="bar-seg down" :style="{ width: store.downRatio + '%' }" v-if="store.downRatio > 0"></div>
           </div>
 
           <!-- four compact metric columns (icon+value inline) -->
@@ -628,7 +628,7 @@ onUnmounted(() => { disconnectWebSocket(); store.wsConnected = false })
 /* --- rank body --- */
 .rank-body {
   max-height: 540px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 .rank-body :deep(.panel-body) {
   max-height: none;
