@@ -128,6 +128,10 @@ PAGE = """<!DOCTYPE html>
         <label>回放间隔（秒）</label>
         <input type="number" id="interval_jsonl" value="1" min="0.1" max="60" step="0.1">
       </div>
+      <div class="form-row">
+        <label>日期过滤（只推送该 trade_date 的记录，留空=全部）</label>
+        <input type="text" id="filter_date" placeholder="例: 2026-06-30" style="width:100%;padding:6px 10px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+      </div>
     </div>
   </div>
 
@@ -218,6 +222,7 @@ function startCollector() {
     params.append('interval', document.getElementById('interval_sina').value);
   } else {
     params.append('interval', document.getElementById('interval_jsonl').value);
+    params.append('filter_date', document.getElementById('filter_date').value);
   }
   fetch('/start?' + params.toString(), {method:'POST'})
     .then(r => r.json()).then(d => {
@@ -363,6 +368,7 @@ def start():
     interval = request.args.get("interval", "30")
     stock_limit = request.args.get("limit", "200")
     rolling_size = request.args.get("rolling", "200")
+    filter_date = request.args.get("filter_date", "")
 
     _stop_container()
 
@@ -371,6 +377,7 @@ def start():
         "INTERVAL": interval,
         "STOCK_LIMIT": stock_limit,
         "ROLLING_SIZE": rolling_size,
+        "JSONL_FILTER_DATE": filter_date,
         "REDIS_PASSWORD": os.environ.get("REDIS_PASSWORD", ""),
     }
 

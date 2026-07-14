@@ -9,6 +9,8 @@ SOURCE_TYPE = os.environ.get("SOURCE_TYPE", "sina")
 
 # JSONL 文件目录（仅 jsonl 模式使用）
 JSONL_DIR = os.environ.get("JSONL_DIR", "jsonl")
+# JSONL 模式日期过滤：只推送 trade_date 等于该值的记录，空串=不过滤
+JSONL_FILTER_DATE = os.environ.get("JSONL_FILTER_DATE", "")
 
 # Kafka 连接 (mid)
 KAFKA_SERVERS = os.environ.get("KAFKA_SERVERS", "192.168.137.210:9092").split(",")
@@ -31,6 +33,9 @@ REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "30"))
 
 # 交易时段限制: 只在周一~周五 8:30-16:00 采集，非交易时段休眠 5 分钟
 TRADING_HOURS_ONLY = os.environ.get("TRADING_HOURS_ONLY", "1") == "1"
+
+# sina 模式：只推送 trade_date = 当天的数据（防止停牌股推送旧行情）
+SINA_FILTER_TODAY = os.environ.get("SINA_FILTER_TODAY", "1") == "1"
 
 # 第一阶段股票数量 (可通过环境变量覆盖)
 # 0 表示全量

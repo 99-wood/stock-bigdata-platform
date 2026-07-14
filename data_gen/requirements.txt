@@ -4,3 +4,5 @@ urllib3==2.2.3
 redis==5.2.1
 flask==3.1.1
 docker==7.1.0
+akshare==1.18.64
+pymysql==1.1.1

@@ -140,9 +140,11 @@ def run_sina(source, producer, redis_client):
     log.info(f"Stocks: {len(config.STOCK_CODES)}  Batch: {config.BATCH_SIZE}")
     log.info(f"Interval: {config.INTERVAL}s")
     log.info(f"Trading hours only: {config.TRADING_HOURS_ONLY}")
+    log.info(f"Filter today only: {config.SINA_FILTER_TODAY}")
 
     round_num = 0
     total_sent = 0
+    total_filtered = 0
 
     try:
         while True:
@@ -155,6 +157,13 @@ def run_sina(source, producer, redis_client):
 
             round_start = time.time()
             rows = source.fetch_round()
+
+            # sina 模式：只推送当天日期数据
+            if config.SINA_FILTER_TODAY and rows:
+                today = datetime.now().strftime("%Y-%m-%d")
+                before = len(rows)
+                rows = [r for r in rows if r.get("trade_date", "") == today]
+                total_filtered += before - len(rows)
 
             if rows:
                 sent = send_to_kafka(producer, redis_client, rows)
@@ -169,6 +178,7 @@ def run_sina(source, producer, redis_client):
                     f"sent={sent}  "
                     f"elapsed={elapsed:.1f}s  "
                     f"total={total_sent:,}"
+                    + (f"  filtered={total_filtered:,}" if config.SINA_FILTER_TODAY else "")
                 )
             else:
                 round_num += 1
