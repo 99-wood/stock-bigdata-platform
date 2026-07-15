@@ -119,6 +119,16 @@ public class HistoryService {
         }
     }
 
+    /** Get the latest date that has minute data for a code. */
+    public String getLatestMinuteDate(String code) {
+        try {
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+            return jdbc.queryForObject(
+                "SELECT DATE_FORMAT(MAX(minute_time), '%Y-%m-%d') FROM dws_stock_minute WHERE code = ?",
+                String.class, code);
+        } catch (Exception e) { return null; }
+    }
+
     /** Get minute K-line for a specific date. */
     public List<Map<String, Object>> getMinuteHistory(String code, String date) {
         try {

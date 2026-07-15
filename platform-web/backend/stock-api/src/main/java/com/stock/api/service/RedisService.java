@@ -675,6 +675,23 @@ public class RedisService {
         }
     }
 
+    /** Get latest trade date (yyyy-MM-dd) from OHLCV data. */
+    public String getLatestTradeDate() {
+        String time = getLatestTradeTime();
+        return time != null && time.length() >= 10 ? time.substring(0, 10) : null;
+    }
+
+    /** Get latest date from minute windows SET (yyyy-MM-dd). */
+    public String getLatestMinuteDate() {
+        try {
+            Set<String> windows = stringRedisTemplate.opsForSet().members(KEY_MINUTE_WINDOWS);
+            if (windows == null || windows.isEmpty()) return null;
+            return windows.stream()
+                    .map(w -> w.substring(0, 10))
+                    .max(Comparator.naturalOrder()).orElse(null);
+        } catch (Exception e) { return null; }
+    }
+
     /**
      * Get latest trade time by sampling one code from OHLCV Set.
      * Returns "yyyy-MM-dd HH:mm:ss" or null if no data available.
